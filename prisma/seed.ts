@@ -352,7 +352,10 @@ Visible wear such as scuffs or small dents. The best price, with the same perfor
 
 async function main() {
   // wipe (dev only)
-  const tables = ["sellerTransaction", "payout", "sellerReview", "sellerMessage", "productQuestion", "commissionRule", "orderEvent", "refund", "returnRequest", "orderItem", "sellerOrder", "order", "review", "wishlistItem", "stockAlert", "inventoryAdjustment", "collectionProduct", "collection",
+  // The ledger is append-only (DB triggers). The DEMO seed may clear it; this must never run against production data.
+  const { dropLedgerTriggers, applyLedgerTriggers } = await import("../scripts/apply-ledger-triggers");
+  await dropLedgerTriggers(db);
+  const tables = ["ledgerLine", "ledgerTransaction", "caseMessage", "supportCase", "privateFile", "tradeIn", "sellerTransaction", "payout", "sellerReview", "sellerMessage", "productQuestion", "commissionRule", "orderEvent", "refund", "returnRequest", "orderItem", "sellerOrder", "order", "review", "wishlistItem", "stockAlert", "inventoryAdjustment", "collectionProduct", "collection",
     "variant", "productOption", "productImage", "product", "seller", "category", "discount", "giftCard", "checkout", "page", "article", "shippingRate", "activityLog", "emailLog", "subscriber", "redirect", "setting"] as const;
   for (const t of tables) await (db[t] as unknown as { deleteMany: () => Promise<unknown> }).deleteMany();
 
@@ -489,6 +492,7 @@ async function main() {
   await db.sellerReview.create({ data: { sellerId: s1.id, userId: u2.id, rating: 5, comment: "Fair prices and quick replies on WhatsApp." } });
   await db.productQuestion.create({ data: { productId: (await db.product.findUniqueOrThrow({ where: { slug: "nvidia-geforce-rtx-4070-super-12gb" } })).id, name: "Ahmed", email: "ahmed@example.com", question: "Will this fit in a mini-ITX case?", answer: "It's a 2.5-slot, 267mm card — it fits most ITX cases that support 270mm+ GPUs.", answeredAt: new Date(), published: true } });
 
+  await applyLedgerTriggers(db);
   console.log(`Seeded ${categories.length} categories, ${products.length} products, 4 collections, ${pages.length} pages, ${articles.length} articles. Admin: ${email}`);
 }
 
