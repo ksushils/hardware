@@ -1,41 +1,47 @@
-// All prices are VAT-inclusive (UAE standard 5%).
-export const VAT_RATE = 0.05;
-export const EXPRESS_FEE = 25;
-export const STANDARD_FEE = 15;
-export const FREE_SHIPPING_MIN = 200;
-export const COD_FEE = 10;
+// Shared by server and client. All prices are VAT-inclusive.
+export type PricingConfig = { taxRate: number; codFee: number; carePlusPercent: number; carePlusMin: number };
+export const DEFAULT_PRICING: PricingConfig = { taxRate: 5, codFee: 10, carePlusPercent: 6, carePlusMin: 29 };
 
-export function warrantyPrice(price: number) {
-  return Math.max(29, Math.round(price * 0.06));
+export function warrantyPrice(price: number, cfg: PricingConfig = DEFAULT_PRICING) {
+  return Math.max(cfg.carePlusMin, Math.round(price * (cfg.carePlusPercent / 100)));
 }
 
 export type PricedLine = { price: number; quantity: number; warranty: boolean };
+export type RateLike = { price: number; freeAbove: number | null } | null;
 
-export type Coupon = { code: string; type: string; value: number; minSpend: number };
+export function lineTotal(l: PricedLine, cfg: PricingConfig = DEFAULT_PRICING) {
+  return (l.price + (l.warranty ? warrantyPrice(l.price, cfg) : 0)) * l.quantity;
+}
 
+/**
+ * discount: amount already evaluated server-side (see lib/discounts.ts)
+ * freeShipping: from a FREE_SHIPPING discount
+ * giftCardBalance: available gift card balance, applied last
+ */
 export function computeTotals(
   lines: PricedLine[],
-  opts: { shippingMethod?: string; paymentMethod?: string; coupon?: Coupon | null } = {},
+  opts: { rate?: RateLike; paymentMethod?: string; discount?: number; freeShipping?: boolean; giftCardBalance?: number; cfg?: PricingConfig } = {},
 ) {
-  const subtotal = lines.reduce(
-    (s, l) => s + (l.price + (l.warranty ? warrantyPrice(l.price) : 0)) * l.quantity,
-    0,
-  );
-  let discount = 0;
-  if (opts.coupon && subtotal >= opts.coupon.minSpend) {
-    discount =
-      opts.coupon.type === "PERCENT" ? Math.round(subtotal * (opts.coupon.value / 100)) : opts.coupon.value;
-    discount = Math.min(discount, subtotal);
+  const cfg = opts.cfg ?? DEFAULT_PRICING;
+  const subtotal = round(lines.reduce((s, l) => s + lineTotal(l, cfg), 0));
+  const discount = round(Math.min(opts.discount ?? 0, subtotal));
+  const afterDiscount = subtotal - discount;
+  let shipping = 0;
+  if (opts.rate && !opts.freeShipping) {
+    shipping = opts.rate.freeAbove != null && afterDiscount >= opts.rate.freeAbove ? 0 : opts.rate.price;
   }
-  let shipping = subtotal - discount >= FREE_SHIPPING_MIN || subtotal === 0 ? 0 : STANDARD_FEE;
-  if (opts.shippingMethod === "EXPRESS") shipping = EXPRESS_FEE;
-  const codFee = opts.paymentMethod === "COD" ? COD_FEE : 0;
-  shipping += codFee;
-  const total = Math.max(0, subtotal - discount + shipping);
-  const vat = Math.round((total - total / (1 + VAT_RATE)) * 100) / 100;
-  return { subtotal, discount, shipping, codFee, vat, total };
+  const codFee = opts.paymentMethod === "COD" ? cfg.codFee : 0;
+  const gross = round(afterDiscount + shipping + codFee);
+  const vat = round(gross - gross / (1 + cfg.taxRate / 100));
+  const giftCard = round(Math.min(opts.giftCardBalance ?? 0, gross));
+  const total = round(gross - giftCard);
+  return { subtotal, discount, shipping, codFee, gross, vat, giftCard, total };
 }
 
 export function installment(total: number, parts = 4) {
   return Math.ceil((total / parts) * 100) / 100;
+}
+
+function round(n: number) {
+  return Math.round(n * 100) / 100;
 }

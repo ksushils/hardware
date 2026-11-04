@@ -2,24 +2,18 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { readCart, writeCart } from "@/lib/cart";
+import { getUser } from "@/lib/auth";
+import { addEntry, readCart, writeCart } from "@/lib/cart";
+import { maxQty } from "@/lib/inventory";
 
 export async function addToCart(formData: FormData) {
   const variantId = String(formData.get("variantId") || "");
-  const qty = Math.max(1, Math.min(10, Number(formData.get("quantity") || 1)));
-  const warranty = formData.get("warranty") === "on";
-  const buyNow = formData.get("buyNow") === "1";
-  const variant = await db.variant.findUnique({ where: { id: variantId } });
-  if (!variant || variant.stock < 1) return;
-  const cart = await readCart();
-  const existing = cart.find((e) => e.v === variantId);
-  if (existing) {
-    existing.q = Math.min(variant.stock, existing.q + qty);
-    existing.w = existing.w || warranty;
-  } else cart.push({ v: variantId, q: Math.min(variant.stock, qty), w: warranty });
-  await writeCart(cart);
+  const qty = Math.max(1, Math.min(20, Number(formData.get("quantity") || 1)));
+  const ok = await addEntry(variantId, qty, formData.get("warranty") === "on");
   revalidatePath("/", "layout");
-  redirect(buyNow ? "/checkout" : "/cart?added=1");
+  if (!ok) return;
+  if (formData.get("stay") === "1") return;
+  redirect(formData.get("buyNow") === "1" ? "/checkout" : "/cart?added=1");
 }
 
 export async function updateCartItem(formData: FormData) {
@@ -31,7 +25,7 @@ export async function updateCartItem(formData: FormData) {
     if (!qty || qty < 1) cart.splice(cart.indexOf(entry), 1);
     else {
       const variant = await db.variant.findUnique({ where: { id: variantId } });
-      entry.q = Math.min(qty, variant?.stock ?? qty, 10);
+      entry.q = Math.min(qty, variant ? maxQty(variant, 20) : qty);
     }
     await writeCart(cart);
   }
@@ -53,4 +47,51 @@ export async function removeCartItem(formData: FormData) {
   const variantId = String(formData.get("variantId") || "");
   await writeCart((await readCart()).filter((e) => e.v !== variantId));
   revalidatePath("/", "layout");
+}
+
+/** Cart → wishlist ("save for later"). */
+export async function saveForLater(formData: FormData) {
+  const user = await getUser();
+  const variantId = String(formData.get("variantId") || "");
+  if (!user) redirect("/login?next=/cart");
+  const v = await db.variant.findUnique({ where: { id: variantId } });
+  if (v) {
+    await db.wishlistItem.upsert({ where: { userId_productId: { userId: user.id, productId: v.productId } }, update: {}, create: { userId: user.id, productId: v.productId } });
+    await writeCart((await readCart()).filter((e) => e.v !== variantId));
+  }
+  revalidatePath("/", "layout");
+}
+
+/** Wishlist → cart: adds the cheapest available variant (or the chosen one) and removes it from the wishlist. */
+export async function moveWishlistToCart(formData: FormData) {
+  const user = await getUser();
+  if (!user) redirect("/login?next=/account/wishlist");
+  const productIds = formData.getAll("productId").map(String);
+  for (const productId of productIds) {
+    const variants = await db.variant.findMany({ where: { productId }, orderBy: { price: "asc" } });
+    const chosen = variants.find((v) => maxQty(v) > 0);
+    if (chosen && (await addEntry(chosen.id, 1))) await db.wishlistItem.deleteMany({ where: { userId: user.id, productId } });
+  }
+  revalidatePath("/", "layout");
+  if (formData.get("go") === "cart") redirect("/cart?added=1");
+}
+
+/** Restores a cart from an abandoned-checkout recovery link. */
+export async function restoreCheckoutCart(token: string) {
+  const c = await db.checkout.findUnique({ where: { token } });
+  if (!c || c.recoveredOrder) return false;
+  try {
+    const items = JSON.parse(c.items);
+    if (Array.isArray(items)) await writeCart(items);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/** PC Builder → adds every selected part to the cart. */
+export async function addBuildToCart(variantIds: string[]) {
+  for (const id of variantIds.slice(0, 12)) await addEntry(id, 1);
+  revalidatePath("/", "layout");
+  redirect("/cart?added=1");
 }

@@ -17,3 +17,17 @@
   .card { @apply rounded-2xl border border-slate-200 bg-white; }
   .h-section { @apply text-2xl font-extrabold tracking-tight md:text-3xl; }
 }
+
+/* Admin (Shopify-like) controls */
+@layer components {
+  .btn-a { @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50; }
+  .btn-a-primary { @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 disabled:opacity-50; }
+  .btn-a-danger { @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50; }
+  .in-a { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900; }
+  .prose-x h2 { @apply mt-8 text-2xl font-bold text-slate-900; }
+  .prose-x h3 { @apply mt-6 text-xl font-bold text-slate-900; }
+  .prose-x p { @apply my-3 leading-relaxed; }
+  .prose-x ul { @apply my-3 list-disc ps-6; }
+  .prose-x ol { @apply my-3 list-decimal ps-6; }
+  .prose-x li { @apply my-1; }
+}

@@ -2,41 +2,28 @@ import "server-only";
 import Stripe from "stripe";
 import type { Order, OrderItem } from "@prisma/client";
 import { db } from "./db";
-import { warrantyPrice } from "./pricing";
+import { siteUrl } from "./site";
 
+export { siteUrl };
 export const stripeEnabled = () => !!process.env.STRIPE_SECRET_KEY;
 let _stripe: Stripe | null = null;
 export function stripe() {
   if (!_stripe) _stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   return _stripe;
 }
-export const siteUrl = () => (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000").replace(/\/$/, "");
+const fils = (n: number) => Math.round(n * 100);
 
-/** Creates a Stripe Checkout session in AED (supports cards, Apple Pay and Google Pay). */
+/** Creates a Stripe Checkout session in AED for the amount due (supports cards, Apple Pay and Google Pay). */
 export async function createStripeCheckout(order: Order & { items: OrderItem[] }) {
-  const fils = (n: number) => Math.round(n * 100);
-  const line_items: Stripe.Checkout.SessionCreateParams.LineItem[] = order.items.map((i) => ({
-    quantity: i.quantity,
-    price_data: {
-      currency: "aed",
-      unit_amount: fils(i.price + (i.warranty ? warrantyPrice(i.price) : 0)),
-      product_data: { name: `${i.name} (${i.condition})${i.warranty ? " + Extended warranty" : ""}` },
-    },
-  }));
-  if (order.shipping > 0)
-    line_items.push({ quantity: 1, price_data: { currency: "aed", unit_amount: fils(order.shipping), product_data: { name: "Delivery" } } });
-
-  let discounts: Stripe.Checkout.SessionCreateParams.Discount[] | undefined;
-  if (order.discount > 0) {
-    const coupon = await stripe().coupons.create({ amount_off: fils(order.discount), currency: "aed", duration: "once", name: order.couponCode ?? "Discount" });
-    discounts = [{ coupon: coupon.id }];
-  }
-
+  // Charge one line for the full amount due: discounts, gift cards, shipping and fees are already included in order.total.
   const session = await stripe().checkout.sessions.create({
     mode: "payment",
     customer_email: order.email,
-    line_items,
-    discounts,
+    locale: order.locale === "ar" ? "auto" : "en",
+    line_items: [{
+      quantity: 1,
+      price_data: { currency: "aed", unit_amount: fils(order.total), product_data: { name: `Order ${order.number}`, description: order.items.map((i) => `${i.name} × ${i.quantity}`).join(", ").slice(0, 500) } },
+    }],
     client_reference_id: order.number,
     metadata: { orderNumber: order.number },
     success_url: `${siteUrl()}/order/${order.number}?session_id={CHECKOUT_SESSION_ID}`,
@@ -46,20 +33,22 @@ export async function createStripeCheckout(order: Order & { items: OrderItem[] }
   return session.url!;
 }
 
-/** Idempotently marks an order as paid. */
-export async function markOrderPaid(number: string, ref: string) {
-  const order = await db.order.findUnique({ where: { number } });
-  if (!order || order.paymentStatus === "PAID") return order;
-  return db.order.update({
-    where: { number },
-    data: { paymentStatus: "PAID", status: "PAID", paymentRef: ref },
-  });
-}
-
 export async function verifyStripeSession(number: string, sessionId: string) {
   if (!stripeEnabled()) return;
+  const { markOrderPaid } = await import("./orders");
   const s = await stripe().checkout.sessions.retrieve(sessionId);
-  if (s.metadata?.orderNumber === number && s.payment_status === "paid") await markOrderPaid(number, s.id);
+  if (s.metadata?.orderNumber === number && s.payment_status === "paid") await markOrderPaid(number, String(s.payment_intent ?? s.id));
+}
+
+/** Refunds through Stripe when the order was paid by Stripe; otherwise it's a manual refund (bank transfer / cash). */
+export async function refundPayment(order: Order, amount: number): Promise<{ ok: boolean; ref?: string; error?: string; manual?: boolean }> {
+  if (!stripeEnabled() || order.paymentMethod !== "CARD" || !order.paymentRef?.startsWith("pi_")) return { ok: true, manual: true };
+  try {
+    const r = await stripe().refunds.create({ payment_intent: order.paymentRef, amount: fils(amount) });
+    return { ok: true, ref: r.id };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** Luhn check used by the built-in demo card gateway. */
