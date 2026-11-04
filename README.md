@@ -77,3 +77,17 @@ Demo codes: `WELCOME10`, `UAE50`, `BUILD75`, `FREESHIP` · gift card `GIFT-DEMO-
 5. **Uploads:** they go to `public/uploads`. On serverless hosts, switch `src/lib/uploads.ts` to S3, R2 or Vercel Blob.
 6. **Not yet integrated:** Tabby/Tamara BNPL (needs merchant accounts; messaging is in place) and automatic seller payouts (Stripe Connect).
 7. **Legal:** have Terms, Privacy and the seller terms reviewed (UAE PDPL, consumer protection).
+
+## Deploying to a VPS (alongside other sites)
+The `deploy/` folder has a one-command installer for Ubuntu/Debian:
+- Node 22 and PM2 (skipped if already installed).
+- The app runs on `127.0.0.1:3100`.
+- The database and uploads live in `/var/www/techrevive-data`, so updates never touch them.
+- An nginx site plus HTTPS via certbot.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ksushils/hardware/claude/stoic-goodall-x035q0/deploy/deploy.sh -o deploy.sh   # or copy it over
+DOMAIN=shop.yourdomain.ae bash deploy.sh
+```
+
+Re-run `bash /var/www/techrevive/deploy/deploy.sh` to update. If port 3100 is taken, set `PORT=...`. The repo is private, so the VPS needs a GitHub deploy key, or set `REPO=https://<token>@github.com/ksushils/hardware.git`.
