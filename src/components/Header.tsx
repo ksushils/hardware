@@ -23,6 +23,7 @@ export default async function Header() {
         <div className="container-x flex h-9 items-center justify-between gap-4">
           <p className="truncate">{s.announcement.enabled ? loc(locale, s.announcement.text, s.announcement.textAr) : ""}</p>
           <div className="flex shrink-0 items-center gap-4">
+            <Link href="/become-a-seller" className="font-semibold text-brand-500 hover:underline">🏪 {locale === "ar" ? "كن بائعًا" : "Become a seller"}</Link>
             <Link href="/help" className="hidden hover:underline sm:inline">{t.header.helpCenter}</Link>
             <Link href="/track" className="hidden hover:underline sm:inline">{t.header.trackOrder}</Link>
             {s.languages.arabicEnabled && (
@@ -77,6 +78,8 @@ export default async function Header() {
           {s.mainMenu.map((m) => <Link key={m.url} href={m.url} className="whitespace-nowrap rounded-lg px-3 py-1.5 text-slate-700 hover:bg-slate-100">{loc(locale, m.label, m.labelAr)}</Link>)}
           <Link href="/collections" className="whitespace-nowrap rounded-lg px-3 py-1.5 text-slate-700 hover:bg-slate-100">{t.header.collections}</Link>
           <Link href="/blog" className="whitespace-nowrap rounded-lg px-3 py-1.5 text-slate-700 hover:bg-slate-100">{t.header.blog}</Link>
+          <Link href="/sellers" className="whitespace-nowrap rounded-lg px-3 py-1.5 text-slate-700 hover:bg-slate-100">{locale === "ar" ? "المتاجر" : "Shops"}</Link>
+          <Link href="/become-a-seller" className="whitespace-nowrap rounded-lg px-3 py-1.5 font-semibold text-brand-700 hover:bg-brand-50">🏪 {locale === "ar" ? "كن بائعًا" : "Sell on TechRevive"}</Link>
         </div>
       </div>
     </header>

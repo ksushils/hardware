@@ -36,11 +36,12 @@ export default async function Footer() {
         </div>
         <FooterCol title={t.footer.shop} links={[[t.header.hotDeals, "/deals"], [locale === "ar" ? "جمّع جهازك" : "PC Builder", "/build"], [t.header.collections, "/collections"], [locale === "ar" ? "مقارنة المنتجات" : "Compare products", "/compare"], [t.header.blog, "/blog"]]} />
         <FooterCol title={t.footer.help} links={[[t.header.helpCenter, "/help"], [t.header.trackOrder, "/track"], [t.footer.warrantyReturns, "/pages/warranty"], [t.footer.delivery, "/help#delivery"], [locale === "ar" ? "قيّم جهازك للاستبدال" : "Trade-in estimator", "/trade-in"]]} />
-        <FooterCol title={t.footer.company} links={[...s.footerMenu.map((m) => [loc(locale, m.label, m.labelAr), m.url] as [string, string]), [t.footer.myAccount, "/account"]]} />
+        <FooterCol title={t.footer.company} links={[[locale === "ar" ? "🏪 كن بائعًا" : "🏪 Become a seller", "/become-a-seller"], [locale === "ar" ? "تصفح المتاجر" : "Browse seller shops", "/sellers"], ...s.footerMenu.map((m) => [loc(locale, m.label, m.labelAr), m.url] as [string, string]), [t.footer.myAccount, "/account"]]} />
       </div>
       <div className="border-t border-white/10">
         <div className="container-x flex flex-col items-center justify-between gap-4 py-6 text-xs md:flex-row">
           <p>© {new Date().getFullYear()} {s.legalName}. {t.footer.rights}{s.trn ? ` TRN ${s.trn}` : ""}</p>
+          <Link href="/become-a-seller" className="rounded-full bg-brand-600 px-4 py-1.5 font-semibold text-white hover:bg-brand-500">🏪 {locale === "ar" ? "كن بائعًا على تك ريفايف" : "Become a seller on TechRevive"}</Link>
           <div className="flex flex-wrap gap-2" dir="ltr">
             {["VISA", "Mastercard", "Apple Pay", "Google Pay", "COD"].map((p) => <span key={p} className="rounded-md bg-white/10 px-2.5 py-1 font-semibold text-white">{p}</span>)}
           </div>
