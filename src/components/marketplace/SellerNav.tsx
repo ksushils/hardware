@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
-  ["Dashboard", "/seller", "🏠"], ["Products", "/seller/products", "🏷️"], ["Orders", "/seller/orders", "🧾"], ["Earnings", "/seller/earnings", "💰"],
+  ["Dashboard", "/seller", "🏠"], ["Products", "/seller/products", "🏷️"], ["Bulk import", "/seller/import", "📥"], ["Orders", "/seller/orders", "🧾"], ["Cases", "/seller/cases", "🛟"], ["Earnings", "/seller/earnings", "💰"], ["Statements", "/seller/statements", "📄"],
   ["Payouts", "/seller/payouts", "🏦"], ["Reviews", "/seller/reviews", "⭐"], ["Messages", "/seller/messages", "✉️"], ["Shop settings", "/seller/settings", "⚙️"],
 ] as const;
 

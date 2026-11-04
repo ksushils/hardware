@@ -30,8 +30,9 @@ export async function clearCart() {
 
 /** Adds a variant (merging quantities) respecting stock. Returns false if unavailable. */
 export async function addEntry(variantId: string, qty: number, warranty = false) {
-  const variant = await db.variant.findUnique({ where: { id: variantId }, include: { product: { include: { seller: true } } } });
-  if (!variant || variant.product.status !== "ACTIVE" || variant.product.approvalStatus !== "APPROVED" || !sellerAllowsSales(variant.product.seller) || !isAvailable(variant)) return false;
+  const variant = await db.variant.findUnique({ where: { id: variantId }, include: { seller: true, product: true } });
+  // offer-level checks: the OFFER must be approved and ITS seller (not the product creator) must be allowed to sell
+  if (!variant || variant.product.status !== "ACTIVE" || variant.product.approvalStatus !== "APPROVED" || variant.approvalStatus !== "APPROVED" || !sellerAllowsSales(variant.seller) || !isAvailable(variant)) return false;
   const cart = await readCart();
   const max = maxQty(variant, 20);
   const existing = cart.find((e) => e.v === variantId);
@@ -46,14 +47,15 @@ export async function addEntry(variantId: string, qty: number, warranty = false)
 export async function getCartDetails() {
   const entries = await readCart();
   if (!entries.length) return { items: [], count: 0, entries };
-  const variants = await db.variant.findMany({ where: { id: { in: entries.map((e) => e.v) } }, include: { product: { include: { seller: { select: { id: true, shopName: true, slug: true, status: true, vacationMode: true } } } } } });
+  const variants = await db.variant.findMany({ where: { id: { in: entries.map((e) => e.v) } }, include: { seller: { select: { id: true, shopName: true, slug: true, status: true, vacationMode: true, vacationUntil: true } }, product: { include: { seller: { select: { id: true, shopName: true, slug: true, status: true, vacationMode: true, vacationUntil: true } } } } } });
   const items = entries
     .map((e) => {
       const variant = variants.find((v) => v.id === e.v);
-      if (!variant || variant.product.status !== "ACTIVE" || !sellerAllowsSales(variant.product.seller)) return null;
+      if (!variant || variant.product.status !== "ACTIVE" || variant.product.approvalStatus !== "APPROVED" || variant.approvalStatus !== "APPROVED" || !sellerAllowsSales(variant.seller)) return null;
       const quantity = Math.min(e.q, maxQty(variant, 20));
       if (quantity <= 0) return null;
-      return { variant, product: variant.product, quantity, warranty: !!e.w, requested: e.q };
+      // `seller` = the OFFER's seller (null = sold by the store); `product.seller` is only the product's creator
+      return { variant, product: variant.product, seller: variant.seller, quantity, warranty: !!e.w, requested: e.q };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
   return { items, count: items.reduce((s, i) => s + i.quantity, 0), entries };

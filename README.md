@@ -69,10 +69,19 @@ Demo codes: `WELCOME10`, `UAE50`, `BUILD75`, `FREESHIP` · gift card `GIFT-DEMO-
 - **Commission engine:** rules by global / category / seller / product (percent, fixed or both), plus a per-seller override. A snapshot is taken on every order line. Orders split into per-seller sub-orders; earnings are credited on delivery and held for the return window; refunds debit sellers proportionally.
 - **Admin:** seller approval, suspension and override, product approval queue, payouts (mark paid with bank reference), commission rules, seller review moderation.
 
+## Marketplace v2 (offers, shipments, cases, ledger)
+- **Offers:** one product page, several sellers' offers, ranked transparently (`/grading#ranking`). Condition, battery, repairs, accessories, unit photos and warranty/returns per offer, each labelled seller-declared / verified / not supplied. `docs/offers.md`
+- **Shipments and seller import:** each seller's items ship as their own shipment with their own fee and ETA. Sellers bulk-upload offers from Excel/CSV at `/seller/import`. `docs/shipments-and-import.md`
+- **Support cases:** buyers open order-linked cases (`/account/cases`), sellers respond (`/seller/cases`), staff decide (`/admin/cases`), with SLA escalation, private notes and private evidence. `docs/support-cases.md`
+- **Finance:** immutable double-entry ledger, reconciliation and seller statements (`/admin/finance`, `/seller/statements`). `docs/finance.md`
+- **Security:** private document storage, rate limiting, security headers, verified-buyer reviews. Run `npm test` for the 28 automated tests; CI runs on every push.
+- **Launch status:** see `docs/launch-readiness.md` for what is built versus what still needs your decisions (payments provider, courier, legal review, demo data removal).
+
 ## Production checklist
 1. **Database:** set `provider = "postgresql"` in `prisma/schema.prisma`, set `DATABASE_URL`, run `npx prisma db push`.
 2. **Secrets:** set `AUTH_SECRET` and `NEXT_PUBLIC_SITE_URL`.
 3. **Stripe:** set `STRIPE_SECRET_KEY`; add a webhook at `/api/stripe/webhook` for `checkout.session.completed` and `checkout.session.expired`, and set `STRIPE_WEBHOOK_SECRET`.
+3b. **Demo card page:** it stays on while no Stripe key is set (for testing). Set `DISABLE_DEMO_PAYMENTS=1` for real trading.
 4. **Email:** set `RESEND_API_KEY` (until then, all emails are visible in Admin → Settings → Notifications).
 5. **Uploads:** they go to `public/uploads`. On serverless hosts, switch `src/lib/uploads.ts` to S3, R2 or Vercel Blob.
 6. **Not yet integrated:** Tabby/Tamara BNPL (needs merchant accounts; messaging is in place) and automatic seller payouts (Stripe Connect).

@@ -5,17 +5,18 @@ import type { Address } from "@prisma/client";
 import { placeOrder, applyDiscountCode, checkGiftCard, recordCheckout } from "@/app/actions/checkout";
 import { useFormAction } from "@/hooks/useFormAction";
 import { aed, EMIRATES, EMIRATES_AR, loc } from "@/lib/format";
-import { computeTotals, installment, type PricingConfig } from "@/lib/pricing";
+import { computeTotals, installment, lineTotal, type PricingConfig } from "@/lib/pricing";
+import { buildShipments, etaText, type CarrierWindow, type SellerShipInfo } from "@/lib/shipmentMath";
 import { useI18n, fmt } from "@/components/I18nProvider";
 
-type Item = { id: string; productId: string; name: string; nameAr: string; variantTitle: string; image: string; price: number; quantity: number; warranty: boolean; express: boolean };
+type Item = { id: string; productId: string; name: string; nameAr: string; variantTitle: string; image: string; price: number; quantity: number; warranty: boolean; express: boolean; sellerId: string | null; handlingDays: number };
 type Rate = { id: string; name: string; nameAr: string; emirates: string; price: number; freeAbove: number | null; minOrder: number; maxOrder: number | null; expressOnly: boolean; deliveryDays: string };
 type Applied = { id: string; title: string; code: string | null; type: string; amount: number; freeShipping: boolean };
 
-export default function CheckoutForm({ user, addresses, items, stripe, cfg, checkoutCfg, rates, automatic }: {
+export default function CheckoutForm({ user, addresses, items, stripe, cfg, checkoutCfg, rates, automatic, storeName, sellers, carrier }: {
   user: { email: string; name: string; phone: string } | null; addresses: Address[]; items: Item[]; stripe: boolean; cfg: PricingConfig;
   checkoutCfg: { cardEnabled: boolean; codEnabled: boolean; codMax: number; orderNotes: boolean; marketingOptIn: boolean; bnpl: boolean };
-  rates: Rate[]; automatic: Applied | null;
+  rates: Rate[]; automatic: Applied | null; storeName: string; sellers: SellerShipInfo[]; carrier: CarrierWindow;
 }) {
   const { t, locale } = useI18n();
   const { state, pending, formProps } = useFormAction(placeOrder);
@@ -34,17 +35,29 @@ export default function CheckoutForm({ user, addresses, items, stripe, cfg, chec
     fullName: def?.fullName ?? user?.name ?? "", phone: def?.phone ?? user?.phone ?? "", emirate: def?.emirate ?? "Dubai",
     area: def?.area ?? "", street: def?.street ?? "", building: def?.building ?? "",
   });
-  const allExpress = items.every((i) => i.express);
   const lines = useMemo(() => items.map((i) => ({ price: i.price, quantity: i.quantity, warranty: i.warranty })), [items]);
+  const sellerMap = useMemo(() => Object.fromEntries(sellers.map((x) => [x.id, x])), [sellers]);
+  const shipItems = useMemo(() => items.map((i) => ({ sellerId: i.sellerId, price: i.price, quantity: i.quantity, warranty: i.warranty, handlingDays: i.handlingDays, express: i.express })), [items]);
   const pre = computeTotals(lines, { cfg, discount: discount?.amount });
-  const available = rates.filter((r) => {
-    const em = r.emirates.split(",").map((x) => x.trim()).filter(Boolean);
-    const sub = pre.subtotal - pre.discount;
-    return (!em.length || em.includes(addr.emirate)) && (!r.expressOnly || allExpress) && sub >= r.minOrder && (r.maxOrder == null || sub <= r.maxOrder);
-  });
+
+  // The store ships its own items as one parcel and the buyer picks its delivery rate; each marketplace seller ships separately.
+  const storeIdx = shipItems.map((x, i) => (x.sellerId ? -1 : i)).filter((i) => i >= 0);
+  const hasStore = storeIdx.length > 0;
+  const storeSub = storeIdx.reduce((sum, i) => sum + lineTotal(shipItems[i], cfg), 0);
+  const share = pre.subtotal > 0 ? (pre.subtotal - pre.discount) / pre.subtotal : 1;
+  const storeAfterDiscount = Math.round(storeSub * share * 100) / 100;
+  const storeAllExpress = storeIdx.every((i) => shipItems[i].express);
+  const available = hasStore
+    ? rates.filter((r) => {
+        const em = r.emirates.split(",").map((x) => x.trim()).filter(Boolean);
+        return (!em.length || em.includes(addr.emirate)) && (!r.expressOnly || storeAllExpress) && storeAfterDiscount >= r.minOrder && (r.maxOrder == null || storeAfterDiscount <= r.maxOrder);
+      })
+    : [];
   const [rateId, setRateId] = useState<string>("");
   const rate = available.find((r) => r.id === rateId) ?? available[0] ?? null;
-  const totals = computeTotals(lines, { cfg, rate, paymentMethod, discount: discount?.amount, freeShipping: discount?.freeShipping, giftCardBalance: gift?.balance });
+  const shipments = buildShipments(shipItems, sellerMap, { cfg, carrier, rate, discount: discount?.amount, freeShipping: discount?.freeShipping });
+  const N = shipments.length;
+  const totals = computeTotals(lines, { cfg, paymentMethod, discount: discount?.amount, freeShipping: discount?.freeShipping, giftCardBalance: gift?.balance, shipmentFees: shipments.map((x) => x.fee) });
   const codTooHigh = totals.total > checkoutCfg.codMax;
 
   useEffect(() => { if (user) recordCheckout(user.email); }, [user]);
@@ -104,19 +117,37 @@ export default function CheckoutForm({ user, addresses, items, stripe, cfg, chec
         </Section>
 
         <Section n={3} title={t.checkout.deliveryMethod}>
-          {available.length === 0 ? <p className="text-sm text-red-600">{t.checkout.noRates}</p> : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {available.map((r) => {
-                const free = discount?.freeShipping || (r.freeAbove != null && pre.subtotal - pre.discount >= r.freeAbove);
-                return (
-                  <Choice key={r.id} name="rateId" value={r.id} checked={rate?.id === r.id} onChange={setRateId}
-                    title={`${loc(locale, r.name, r.nameAr)} · ${free ? t.cart.free : aed(r.price, locale)}`}
-                    sub={`${days(r.deliveryDays)}${r.freeAbove != null && !free ? ` · ${fmt(t.checkout.freeAbove, { amount: aed(r.freeAbove, locale) })}` : ""}`} />
-                );
-              })}
-            </div>
+          {hasStore && (
+            <>
+              {N > 1 && <p className="mb-2 text-sm font-semibold">{locale === "ar" ? `طريقة التوصيل من ${storeName}` : `Delivery method for items from ${storeName}`}</p>}
+              {available.length === 0 ? <p className="text-sm text-red-600">{t.checkout.noRates}</p> : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {available.map((r) => {
+                    const free = discount?.freeShipping || (r.freeAbove != null && storeAfterDiscount >= r.freeAbove);
+                    return (
+                      <Choice key={r.id} name="rateId" value={r.id} checked={rate?.id === r.id} onChange={setRateId}
+                        title={`${loc(locale, r.name, r.nameAr)} · ${free ? t.cart.free : aed(r.price, locale)}`}
+                        sub={`${days(r.deliveryDays)}${r.freeAbove != null && !free ? ` · ${fmt(t.checkout.freeAbove, { amount: aed(r.freeAbove, locale) })}` : ""}`} />
+                    );
+                  })}
+                </div>
+              )}
+              {rate && <input type="hidden" name="rateId" value={rate.id} />}
+            </>
           )}
-          {rate && <input type="hidden" name="rateId" value={rate.id} />}
+          {/* Every shipment with its own fee and arrival window — never one date for parcels that ship separately */}
+          <div className={hasStore ? "mt-4 space-y-2" : "space-y-2"} aria-label={locale === "ar" ? "الشحنات" : "Shipments"}>
+            {(N > 1 || !hasStore) && <p className="text-sm font-semibold">{locale === "ar" ? `سيصلك طلبك في ${N} ${N === 1 ? "شحنة" : "شحنات"}` : `Your order arrives in ${N} ${N === 1 ? "shipment" : "shipments"}`}</p>}
+            {shipments.map((sh, n) => (
+              <div key={sh.key} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                <div>
+                  <p className="font-semibold">{locale === "ar" ? `شحنة ${n + 1} من ${N}` : `Shipment ${n + 1} of ${N}`} · {locale === "ar" ? "يُباع بواسطة" : "sold by"} {sh.kind === "SELLER" ? sh.sellerName : storeName}</p>
+                  <p className="text-xs text-slate-600">{sh.itemIndexes.length} {locale === "ar" ? "منتج" : sh.itemIndexes.length === 1 ? "item" : "items"}{sh.etaMin != null ? ` · ${locale === "ar" ? "يصل خلال" : "arrives in"} ${etaText(sh.etaMin, sh.etaMax, locale)}` : ""}</p>
+                </div>
+                <p className="font-bold">{sh.fee > 0 ? aed(sh.fee, locale) : t.cart.free}</p>
+              </div>
+            ))}
+          </div>
         </Section>
 
         <Section n={4} title={t.checkout.payment}>
@@ -131,22 +162,33 @@ export default function CheckoutForm({ user, addresses, items, stripe, cfg, chec
 
       <aside className="card h-fit space-y-4 p-5 lg:sticky lg:top-36">
         <h2 className="text-lg font-bold">{t.checkout.yourOrder}</h2>
-        <ul className="space-y-3">
-          {items.map((i) => (
-            <li key={i.id} className="flex gap-3">
-              <div className="relative h-14 w-14 shrink-0 rounded-lg bg-slate-50">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={i.image} alt="" className="h-full w-full object-contain p-1" />
-                <span className="absolute -end-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-slate-700 text-[11px] font-bold text-white">{i.quantity}</span>
-              </div>
-              <div className="flex-1 text-sm">
-                <p className="line-clamp-2 font-medium">{loc(locale, i.name, i.nameAr)}</p>
-                <p className="text-xs text-slate-500">{i.variantTitle.split(" / ").map((x) => t.values[x] ?? x).join(" / ")}{i.warranty ? " · Care+" : ""}</p>
-              </div>
-              <p className="text-sm font-semibold">{aed(i.price * i.quantity, locale)}</p>
-            </li>
+        <div className="space-y-4">
+          {shipments.map((sh, n) => (
+            <div key={sh.key}>
+              {N > 1 && <p className="mb-2 text-xs font-semibold text-slate-500">{locale === "ar" ? `شحنة ${n + 1} من ${N} · ` : `Shipment ${n + 1} of ${N} · `}{sh.kind === "SELLER" ? sh.sellerName : storeName}</p>}
+              <ul className="space-y-3">
+                {sh.itemIndexes.map((idx) => {
+                  const i = items[idx];
+                  return (
+                    <li key={i.id} className="flex gap-3">
+                      <div className="relative h-14 w-14 shrink-0 rounded-lg bg-slate-50">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={i.image} alt="" className="h-full w-full object-contain p-1" />
+                        <span className="absolute -end-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-slate-700 text-[11px] font-bold text-white">{i.quantity}</span>
+                      </div>
+                      <div className="flex-1 text-sm">
+                        <p className="line-clamp-2 font-medium">{loc(locale, i.name, i.nameAr)}</p>
+                        <p className="text-xs text-slate-500">{i.variantTitle.split(" / ").map((x) => t.values[x] ?? x).join(" / ")}{i.warranty ? " · Care+" : ""}</p>
+                        {N === 1 && <p className="text-xs text-slate-500">{locale === "ar" ? "يُباع بواسطة" : "Sold by"} {sh.kind === "SELLER" ? sh.sellerName : storeName}</p>}
+                      </div>
+                      <p className="text-sm font-semibold">{aed(i.price * i.quantity, locale)}</p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </div>
         <div className="flex gap-2">
           <input value={codeInput} onChange={(e) => setCodeInput(e.target.value.toUpperCase())} placeholder={t.checkout.discountCode} aria-label={t.checkout.discountCode} className="input py-2" />
           <button type="button" onClick={applyCode} disabled={!codeInput || checking} className="btn-outline py-2">{t.common.apply}</button>
@@ -165,14 +207,16 @@ export default function CheckoutForm({ user, addresses, items, stripe, cfg, chec
         <div className="space-y-2 border-t pt-3 text-sm">
           <Row l={t.cart.subtotal} r={aed(totals.subtotal, locale)} />
           {totals.discount > 0 && <Row l={`${t.checkout.discount} (${discount?.code ?? discount?.title ?? t.checkout.automatic})`} r={`− ${aed(totals.discount, locale)}`} />}
-          <Row l={t.checkout.shipping} r={totals.shipping ? aed(totals.shipping, locale) : t.cart.free} />
+          {N > 1
+            ? shipments.map((sh, n) => <Row key={sh.key} l={`${t.checkout.shipping} · ${locale === "ar" ? `شحنة ${n + 1}` : `shipment ${n + 1}`}`} r={sh.fee > 0 && !discount?.freeShipping ? aed(sh.fee, locale) : t.cart.free} />)
+            : <Row l={t.checkout.shipping} r={totals.shipping ? aed(totals.shipping, locale) : t.cart.free} />}
           {totals.codFee > 0 && <Row l={t.checkout.codFee} r={aed(totals.codFee, locale)} />}
           {totals.giftCard > 0 && <Row l={t.checkout.giftCardUsed} r={`− ${aed(totals.giftCard, locale)}`} />}
           <div className="flex justify-between border-t pt-2 text-base font-bold"><span>{t.checkout.total}</span><span>{aed(totals.total, locale)}</span></div>
           <p className="text-xs text-slate-500">{fmt(t.checkout.includesVat, { amount: aed(totals.vat, locale) })}</p>
         </div>
         {state?.error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{state.error}</p>}
-        <button className="btn-primary w-full" disabled={pending || !rate}>
+        <button className="btn-primary w-full" disabled={pending || (hasStore && !rate)}>
           {pending ? t.checkout.placing : paymentMethod === "CARD" && totals.total > 0 ? fmt(t.checkout.pay, { amount: aed(totals.total, locale) }) : t.checkout.placeOrder}
         </button>
         <p className="text-center text-xs text-slate-500">{t.checkout.agree} <Link href="/pages/terms" className="underline">{t.checkout.terms}</Link>.</p>

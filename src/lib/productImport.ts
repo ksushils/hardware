@@ -249,7 +249,8 @@ export async function applyImport(products: ParsedProduct[], mode: "update" | "s
       if (p.options.length)
         await db.productOption.createMany({ data: p.options.map((o, i) => ({ productId: productId!, name: o.name, position: i, values: JSON.stringify(o.values) })) });
 
-      const existingVariants = await db.variant.findMany({ where: { productId } });
+      // the admin import manages the STORE's own offers only; marketplace sellers' offers on this product must never be matched or removed
+      const existingVariants = await db.variant.findMany({ where: { productId, sellerId: null } });
       const keep = new Set<string>();
       for (const [i, v] of p.variants.entries()) {
         const match =

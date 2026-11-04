@@ -36,9 +36,14 @@ export async function loadProductInput(id: string) {
     seoTitle: p.seoTitle ?? "", seoDescription: p.seoDescription ?? "", slug: p.slug,
     images: p.images.length ? p.images.map((i) => ({ url: i.url, alt: i.alt })) : p.image ? [{ url: p.image, alt: p.name }] : [],
     options: p.options.map((o) => ({ name: o.name, nameAr: o.nameAr, values: parseValues(o.values) })),
-    variants: p.variants.map((v) => ({
+    // only the store's own offers are edited here; seller offers are moderated under Marketplace
+    variants: p.variants.filter((v) => !v.sellerId).map((v) => ({
       id: v.id, option1: v.option1, option2: v.option2, option3: v.option3, price: v.price, comparePrice: v.comparePrice ?? "", cost: v.cost ?? "",
       sku: v.sku ?? "", barcode: v.barcode ?? "", stock: v.stock, weight: v.weight ?? "", trackInventory: v.trackInventory, continueSelling: v.continueSelling, image: v.image ?? "",
+      conditionType: v.conditionType ?? "", cosmeticGrade: v.cosmeticGrade ?? "", functionalStatus: v.functionalStatus ?? "", batteryHealth: v.batteryHealth ?? "", batteryCycles: v.batteryCycles ?? "",
+      repairDisclosure: v.repairDisclosure ?? "", accessories: v.accessories ?? "", verification: v.verification, testedAt: v.testedAt ? v.testedAt.toISOString().slice(0, 10) : "", testedBy: v.testedBy ?? "",
+      testNotes: v.testNotes ?? "", warrantyProvider: v.warrantyProvider ?? "", warrantyMonths: v.warrantyMonths ?? "", warrantyTerms: v.warrantyTerms ?? "", returnDays: v.returnDays ?? "",
+      returnTerms: v.returnTerms ?? "", handlingDays: v.handlingDays, photos: (() => { try { return JSON.parse(v.photos) as string[]; } catch { return []; } })(),
     })),
   };
   return { product: p, input };

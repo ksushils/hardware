@@ -4,6 +4,8 @@ import { aed, EMIRATES } from "@/lib/format";
 import { Badge, Card, PageHeader } from "@/components/admin/ui";
 import { ConfirmButton } from "@/components/admin/client";
 import ShippingRateForm from "@/components/admin/store/ShippingRateForm";
+import CarrierWindowForm from "@/components/admin/store/CarrierWindowForm";
+import { getSettings } from "@/lib/settings";
 import { deleteShippingRate } from "@/app/actions/admin/settings";
 
 export const metadata = { title: "Shipping & delivery" };
@@ -12,6 +14,7 @@ export default async function ShippingSettings({ searchParams }: { searchParams:
   await requirePermission("settings");
   const { edit } = await searchParams;
   const rates = await db.shippingRate.findMany({ orderBy: { position: "asc" } });
+  const settings = await getSettings();
   return (
     <div className="space-y-5">
       <PageHeader title="Shipping & delivery" back="/admin/settings" subtitle="Rates shown at checkout, filtered by the customer's emirate and cart" />
@@ -38,6 +41,7 @@ export default async function ShippingSettings({ searchParams }: { searchParams:
         </ul>
       </Card>
       <Card title="Add delivery rate"><ShippingRateForm /></Card>
+      <Card title="Seller-shipped parcels (marketplace)"><CarrierWindowForm min={settings.delivery.carrierMinDays} max={settings.delivery.carrierMaxDays} /></Card>
     </div>
   );
 }

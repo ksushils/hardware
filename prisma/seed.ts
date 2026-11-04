@@ -492,6 +492,9 @@ async function main() {
   await db.sellerReview.create({ data: { sellerId: s1.id, userId: u2.id, rating: 5, comment: "Fair prices and quick replies on WhatsApp." } });
   await db.productQuestion.create({ data: { productId: (await db.product.findUniqueOrThrow({ where: { slug: "nvidia-geforce-rtx-4070-super-12gb" } })).id, name: "Ahmed", email: "ahmed@example.com", question: "Will this fit in a mini-ITX case?", answer: "It's a 2.5-slot, 267mm card — it fits most ITX cases that support 270mm+ GPUs.", answeredAt: new Date(), published: true } });
 
+  // Demo seller offers on existing canonical products (labelled demo; remove before real trading)
+  const { seedOffers } = await import("./seedOffers");
+  await seedOffers(db);
   await applyLedgerTriggers(db);
   console.log(`Seeded ${categories.length} categories, ${products.length} products, 4 collections, ${pages.length} pages, ${articles.length} articles. Admin: ${email}`);
 }

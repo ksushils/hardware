@@ -1,7 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { db } from "@/lib/db";
-import { productInclude, searchProducts, visibleWhere } from "@/lib/catalog";
+import { listedProducts, productInclude, searchProducts, visibleWhere } from "@/lib/catalog";
 import { getCollectionProducts } from "@/lib/collections";
 import { getI18n } from "@/lib/i18n";
 import { getSettings } from "@/lib/settings";
@@ -20,7 +20,7 @@ export default async function Home() {
     db.category.findMany({ orderBy: { sortOrder: "asc" }, include: { _count: { select: { products: { where: visibleWhere } } } } }),
     searchProducts({ featured: true }),
     searchProducts({ sort: "discount", inStock: true }),
-    db.product.findMany({ where: { ...visibleWhere, category: { slug: "graphics-cards" } }, include: productInclude, take: 4 }),
+    db.product.findMany({ where: { ...visibleWhere, category: { slug: "graphics-cards" } }, include: productInclude, take: 8 }).then((r) => listedProducts(r).slice(0, 4)),
     db.collection.findMany({ where: { published: true, showOnHome: true }, take: 3 }),
     db.article.findMany({ where: { published: true, publishedAt: { lte: new Date() } }, orderBy: { publishedAt: "desc" }, take: 3 }),
   ]);

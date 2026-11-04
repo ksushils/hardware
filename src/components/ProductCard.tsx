@@ -3,7 +3,8 @@ import Image from "next/image";
 import { availableConditions, bestVariant, rating, type CatalogProduct } from "@/lib/catalog";
 import { aed, loc, pctOff } from "@/lib/format";
 import { installment } from "@/lib/pricing";
-import { isAvailable, newPriceFor } from "@/lib/inventory";
+import { isAvailable } from "@/lib/inventory";
+import { referenceNewPrice } from "@/lib/offers";
 import { getI18n, fmt } from "@/lib/i18n";
 import { CompareToggle } from "./Compare";
 import { BoltIcon, StarIcon } from "./Icons";
@@ -13,13 +14,15 @@ export default async function ProductCard({ product, priority }: { product: Cata
   const best = bestVariant(product);
   const price = best?.price ?? 0;
   const condIdx = Math.max(0, product.options.findIndex((o) => o.name.toLowerCase() === "condition"));
-  const refNew = best ? newPriceFor(best, product.variants, product.priceNew, condIdx) : product.priceNew;
+  const refNew = best ? referenceNewPrice(best, product.variants, product.priceNew, condIdx) : product.priceNew;
   const off = pctOff(price, refNew);
   const r = rating(product);
   const conditions = availableConditions(product);
   const soldOut = !product.variants.some(isAvailable);
   const lowStock = !soldOut && product.variants.filter(isAvailable).reduce((s, v) => s + (v.trackInventory ? v.stock : 99), 0) <= 2;
   const name = loc(locale, product.name, product.nameAr);
+  const sellerKeys = [...new Set(product.variants.filter(isAvailable).map((v) => v.sellerId ?? "store"))];
+  const soleSeller = sellerKeys.length === 1 ? product.variants.find((v) => isAvailable(v))?.seller : undefined;
 
   return (
     <Link href={`/products/${product.slug}`} className="card group relative flex flex-col overflow-hidden transition hover:-translate-y-0.5 hover:shadow-lg">
@@ -37,6 +40,8 @@ export default async function ProductCard({ product, priority }: { product: Cata
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{product.brand}</p>
         <h3 className="mt-1 line-clamp-2 font-semibold leading-snug">{name}</h3>
         <p className="mt-1 text-xs text-slate-500">{conditions.map((c) => t.values[c] ?? c).join(" · ") || (soldOut ? t.card.outOfStock : "")}</p>
+        {sellerKeys.length > 1 && <p className="mt-1 text-xs font-semibold text-brand-700">{locale === "ar" ? `${sellerKeys.length} بائعين` : `${sellerKeys.length} sellers`}</p>}
+        {soleSeller && <p className="mt-1 truncate text-xs text-slate-500">{locale === "ar" ? "البائع: " : "Sold by "}{soleSeller.shopName}</p>}
         {r && <p className="mt-1 flex items-center gap-1 text-xs text-amber-500"><StarIcon filled className="h-3.5 w-3.5" /> <span className="text-slate-600">{r.avg.toFixed(1)} ({r.count})</span></p>}
         <div className="mt-auto pt-3">
           <p className="text-xs text-slate-500">{t.common.from}</p>

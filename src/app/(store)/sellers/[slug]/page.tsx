@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { getI18n } from "@/lib/i18n";
 import { getUser } from "@/lib/auth";
-import { productInclude, visibleWhere } from "@/lib/catalog";
+import { listedProducts, productInclude } from "@/lib/catalog";
 import { EMIRATES_AR, loc } from "@/lib/format";
 import { renderMarkdown } from "@/lib/markdown";
 import { siteUrl } from "@/lib/site";
@@ -33,7 +33,9 @@ export default async function SellerShop({ params }: Props) {
   const seller = await db.seller.findUnique({ where: { slug } });
   if (!seller || seller.status !== "APPROVED") notFound();
   const [products, reviews, user] = await Promise.all([
-    db.product.findMany({ where: { ...visibleWhere, sellerId: seller.id }, include: productInclude, orderBy: { createdAt: "desc" } }),
+    // a shop lists every product on which this seller has an approved offer, showing only THEIR offers
+    db.product.findMany({ where: { status: "ACTIVE", approvalStatus: "APPROVED", variants: { some: { sellerId: seller.id, approvalStatus: "APPROVED" } } }, include: productInclude, orderBy: { createdAt: "desc" } })
+      .then((ps) => listedProducts(ps.map((p) => ({ ...p, variants: p.variants.filter((v) => v.sellerId === seller.id) })))),
     db.sellerReview.findMany({ where: { sellerId: seller.id, status: "PUBLISHED" }, orderBy: { createdAt: "desc" }, take: 20 }),
     getUser(),
   ]);

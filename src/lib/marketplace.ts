@@ -32,28 +32,40 @@ export function commissionFor(c: Commission, unitPrice: number, qty: number) {
   return { amount, earning: Math.round((gross - amount) * 100) / 100 };
 }
 
+export type SellerShipmentMeta = { shippingFee: number; etaMinDays: number | null; etaMaxDays: number | null };
+
 /**
- * Splits an order into per-seller sub-orders and snapshots commission on each line.
+ * Splits an order into per-seller sub-orders (one shipment per seller) and snapshots commission on each line.
+ * The seller of a line is the seller of the OFFER (variant.sellerId), recorded on the order item at checkout;
+ * product.sellerId is only the product's creator and is never used to attribute sales.
  * Store-owned items (no seller) are left alone. Earnings are credited to the ledger on delivery (see creditSellerEarnings).
+ * `shipments` carries each seller shipment's delivery fee and ETA computed at checkout (see lib/shipmentMath.ts).
  */
-export async function createSellerOrders(order: Order & { items: OrderItem[] }) {
+export async function createSellerOrders(order: Order & { items: OrderItem[] }, shipments?: Map<string, SellerShipmentMeta>) {
   const productIds = order.items.map((i) => i.productId).filter((x): x is string => !!x);
-  const products = await db.product.findMany({ where: { id: { in: productIds } }, select: { id: true, categoryId: true, sellerId: true } });
+  const variantIds = order.items.map((i) => i.variantId).filter((x): x is string => !!x);
+  const [products, variants] = await Promise.all([
+    db.product.findMany({ where: { id: { in: productIds } }, select: { id: true, categoryId: true } }),
+    db.variant.findMany({ where: { id: { in: variantIds } }, select: { id: true, sellerId: true } }),
+  ]);
   const bySeller = new Map<string, { item: OrderItem; c: ReturnType<typeof commissionFor>; comm: Commission }[]>();
   for (const item of order.items) {
     const p = products.find((x) => x.id === item.productId);
-    if (!p?.sellerId) continue;
-    const comm = await resolveCommission(p);
+    const sellerId = item.sellerId ?? variants.find((v) => v.id === item.variantId)?.sellerId ?? null;
+    if (!p || !sellerId) continue;
+    const comm = await resolveCommission({ id: p.id, categoryId: p.categoryId, sellerId });
     const c = commissionFor(comm, item.price, item.quantity);
-    bySeller.set(p.sellerId, [...(bySeller.get(p.sellerId) ?? []), { item, c, comm }]);
+    bySeller.set(sellerId, [...(bySeller.get(sellerId) ?? []), { item, c, comm }]);
   }
   for (const [sellerId, lines] of bySeller) {
+    const ship = shipments?.get(sellerId);
     const so = await db.sellerOrder.create({
       data: {
         orderId: order.id, sellerId,
         subtotal: lines.reduce((s, l) => s + l.item.price * l.item.quantity, 0),
         commissionTotal: lines.reduce((s, l) => s + l.c.amount, 0),
         sellerEarning: lines.reduce((s, l) => s + l.c.earning, 0),
+        shippingFee: ship?.shippingFee ?? 0, etaMinDays: ship?.etaMinDays ?? null, etaMaxDays: ship?.etaMaxDays ?? null,
       },
     });
     for (const l of lines)
@@ -72,7 +84,8 @@ export async function creditSellerEarnings(sellerOrderId: string) {
   if (exists) return;
   const s = await getSettings();
   await db.sellerTransaction.create({
-    data: { sellerId: so.sellerId, type: "EARNING", amount: so.sellerEarning, sellerOrderId, availableAt: new Date(Date.now() + s.marketplace.holdDays * 86400_000), note: `Order ${so.order.number}` },
+    // the seller's own delivery fee is part of what we owe them (the ledger accrues it too), so it is credited with the earning
+    data: { sellerId: so.sellerId, type: "EARNING", amount: Math.round((so.sellerEarning + (so.shippingFee ?? 0)) * 100) / 100, sellerOrderId, availableAt: new Date(Date.now() + s.marketplace.holdDays * 86400_000), note: `Order ${so.order.number}` },
   });
 }
 
@@ -109,18 +122,21 @@ export async function deliverSellerOrdersForOrder(orderId: string) {
  * On a refund of `amount` (AED) against an order, debit each seller proportionally to their share of the
  * order's merchandise value — only for sub-orders whose earnings were already credited.
  */
-export async function applySellerRefund(orderId: string, amount: number) {
+export async function applySellerRefund(orderId: string, amount: number, onlySellerId?: string) {
   if (amount <= 0) return;
   const order = await db.order.findUnique({ where: { id: orderId }, include: { items: true, sellerOrders: true } });
   if (!order || !order.sellerOrders.length) return;
   const merch = order.items.reduce((s, i) => s + i.price * i.quantity, 0);
   if (merch <= 0) return;
   for (const so of order.sellerOrders) {
+    // support cases refund one seller's item: debit only that seller, against their own sub-order (share = 100% of this refund)
+    if (onlySellerId && so.sellerId !== onlySellerId) continue;
     const credited = await db.sellerTransaction.findFirst({ where: { sellerOrderId: so.id, type: "EARNING" } });
     if (!credited) continue;
-    const share = so.subtotal / merch;
     const earningRatio = so.subtotal > 0 ? so.sellerEarning / so.subtotal : 0;
-    const debit = Math.round(Math.min(amount, order.total) * share * earningRatio * 100) / 100;
+    const debit = onlySellerId
+      ? Math.round(Math.min(amount, so.subtotal) * earningRatio * 100) / 100
+      : Math.round(Math.min(amount, order.total) * (so.subtotal / merch) * earningRatio * 100) / 100;
     if (debit > 0) await db.sellerTransaction.create({ data: { sellerId: so.sellerId, type: "REFUND", amount: -debit, sellerOrderId: so.id, note: `Refund on order ${order.number}` } });
   }
 }

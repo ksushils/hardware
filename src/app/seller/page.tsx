@@ -13,8 +13,9 @@ export default async function SellerDashboard() {
     sellerBalance(seller.id),
     db.sellerOrder.aggregate({ where: { sellerId: seller.id, status: { notIn: ["CANCELLED", "REFUNDED"] } }, _sum: { subtotal: true, commissionTotal: true, sellerEarning: true }, _count: true }),
     db.sellerOrder.findMany({ where: { sellerId: seller.id }, include: { order: { select: { number: true, fullName: true, emirate: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 8 }),
-    db.variant.findMany({ where: { product: { sellerId: seller.id, status: "ACTIVE" }, trackInventory: true, stock: { lte: 2 } }, include: { product: true }, take: 8, orderBy: { stock: "asc" } }),
-    db.product.count({ where: { sellerId: seller.id, approvalStatus: { in: ["PENDING", "REJECTED"] } } }),
+    db.variant.findMany({ where: { sellerId: seller.id, product: { status: "ACTIVE" }, approvalStatus: "APPROVED", trackInventory: true, stock: { lte: 2 } }, include: { product: true }, take: 8, orderBy: { stock: "asc" } }),
+    // products the seller proposed + their offers that await approval or need changes
+    db.variant.count({ where: { sellerId: seller.id, approvalStatus: { in: ["PENDING", "REJECTED"] } } }),
     db.sellerOrder.findMany({ where: { sellerId: seller.id, createdAt: { gte: since }, status: { notIn: ["CANCELLED"] } }, select: { createdAt: true, subtotal: true } }),
     db.sellerReview.findMany({ where: { sellerId: seller.id, status: "PUBLISHED" }, orderBy: { createdAt: "desc" }, take: 3 }),
     db.sellerMessage.count({ where: { sellerId: seller.id, readAt: null } }),
@@ -36,7 +37,7 @@ export default async function SellerDashboard() {
         <Stat label="In hold period" value={`AED ${bal.pending.toLocaleString()}`} sub="Released after the return window" />
       </div>
       <div className="mb-5 grid gap-3 md:grid-cols-3">
-        {[[toShip, "orders to ship", "/seller/orders?status=open"], [pendingProducts, "products awaiting approval or changes", "/seller/products"], [unread, "unread messages", "/seller/messages"]].map(([n, l, h]) => (
+        {[[toShip, "orders to ship", "/seller/orders?status=open"], [pendingProducts, "offers awaiting approval or changes", "/seller/products"], [unread, "unread messages", "/seller/messages"]].map(([n, l, h]) => (
           <Link key={String(h)} href={String(h)} className={`rounded-xl border p-4 text-sm shadow-sm ${Number(n) ? "border-violet-200 bg-violet-50" : "border-slate-200 bg-white"}`}><b className="text-xl">{n}</b> {l} →</Link>
         ))}
       </div>

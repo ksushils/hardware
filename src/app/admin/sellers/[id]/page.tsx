@@ -30,7 +30,11 @@ export default async function SellerDetail({ params, searchParams }: { params: P
   return (
     <>
       <PageHeader back="/admin/sellers" title={<span className="flex items-center gap-2">{seller.shopName} <StatusBadge status={seller.status} /></span>} subtitle={<>/{seller.slug} · applied {seller.createdAt.toLocaleDateString("en-AE")} by {seller.user.name} ({seller.user.email})</>}
-        actions={seller.status === "APPROVED" ? <Link href={`/sellers/${seller.slug}`} target="_blank" className="btn-a">View shop ↗</Link> : undefined} />
+        actions={<>
+          <Link href={`/admin/finance/statements/${seller.id}`} className="btn-a">📄 Statement</Link>
+          <Link href={`/admin/finance/ledger?seller=${seller.id}&account=SELLER_PAYABLE`} className="btn-a">Ledger entries</Link>
+          {seller.status === "APPROVED" && <Link href={`/sellers/${seller.slug}`} target="_blank" className="btn-a">View shop ↗</Link>}
+        </>} />
       <Flash msg={sp.msg} error={sp.error} />
       {seller.rejectionReason && seller.status !== "APPROVED" && <p className="mb-4 rounded-lg bg-amber-50 px-4 py-2 text-sm text-amber-800">Reason on file: {seller.rejectionReason}</p>}
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">

@@ -20,6 +20,7 @@ export function queryFromParams(sp: SP, base: ProductQuery): ProductQuery {
     ...base,
     q: base.q ?? (typeof sp.q === "string" ? sp.q : undefined),
     brand: arr(sp.brand),
+    sellers: arr(sp.seller),
     categories: arr(sp.cat),
     options,
     min: num(sp.min),

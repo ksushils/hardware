@@ -12,7 +12,7 @@ export type NavItem = { label: string; href: string; icon: string; perm?: Permis
 const NAV: NavItem[] = [
   { label: "Home", href: "/admin", icon: "🏠" },
   { label: "Orders", href: "/admin/orders", icon: "🧾", perm: "orders", children: [
-    { label: "Drafts", href: "/admin/draft-orders" }, { label: "Abandoned checkouts", href: "/admin/abandoned" }, { label: "Returns", href: "/admin/returns" }, { label: "Trade-ins", href: "/admin/trade-ins" },
+    { label: "Drafts", href: "/admin/draft-orders" }, { label: "Abandoned checkouts", href: "/admin/abandoned" }, { label: "Returns", href: "/admin/returns" }, { label: "Trade-ins", href: "/admin/trade-ins" }, { label: "Support cases", href: "/admin/cases" },
   ] },
   { label: "Products", href: "/admin/products", icon: "🏷️", perm: "products", children: [
     { label: "Collections", href: "/admin/collections" }, { label: "Inventory", href: "/admin/inventory" }, { label: "Import / export", href: "/admin/products/import" },
@@ -25,7 +25,7 @@ const NAV: NavItem[] = [
   ] },
   { label: "Analytics", href: "/admin/analytics", icon: "📊", perm: "analytics" },
   { label: "Marketplace", href: "/admin/sellers", icon: "🏪", perm: "sellers", children: [
-    { label: "Sellers", href: "/admin/sellers" }, { label: "Product approvals", href: "/admin/sellers/products" }, { label: "Payouts", href: "/admin/sellers/payouts" }, { label: "Commission", href: "/admin/sellers/commission" }, { label: "Seller reviews", href: "/admin/sellers/reviews" },
+    { label: "Sellers", href: "/admin/sellers" }, { label: "Product approvals", href: "/admin/sellers/products" }, { label: "Payouts", href: "/admin/sellers/payouts" }, { label: "Commission", href: "/admin/sellers/commission" }, { label: "Seller reviews", href: "/admin/sellers/reviews" }, { label: "Finance & ledger", href: "/admin/finance" },
   ] },
   { label: "Settings", href: "/admin/settings", icon: "⚙️", perm: "settings", children: [
     { label: "Staff", href: "/admin/settings/staff" }, { label: "Activity log", href: "/admin/settings/activity" },

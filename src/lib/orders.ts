@@ -6,6 +6,7 @@ import { getUser } from "./auth";
 import { isStaff } from "./permissions";
 import { orderEvent } from "./activity";
 import { sendOrderEmail } from "./emails";
+import { postOrderPaidSafe } from "./ledgerPosting";
 import { verifyOrderKey } from "./orderAccess";
 
 const COOKIE = "tr_orders";
@@ -98,6 +99,7 @@ export async function markOrderPaid(number: string, ref: string, userId?: string
     include: { items: true },
   });
   await orderEvent(order.id, "paid", `Payment of AED ${order.total} captured (${order.paymentMethod}${ref ? `, ref ${ref}` : ""}).`, userId);
+  await postOrderPaidSafe(order.id); // double-entry ledger (never blocks the order flow)
   if (order.status === "DRAFT" || ["CARD", "GIFT_CARD"].includes(order.paymentMethod)) await sendOrderEmail(updated, "confirmation");
   return updated;
 }

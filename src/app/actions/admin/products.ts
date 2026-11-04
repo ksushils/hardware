@@ -11,6 +11,11 @@ export type VariantInput = {
   id?: string; option1: string | null; option2: string | null; option3: string | null;
   price: number | string; comparePrice: number | string | null; cost: number | string | null; sku: string; barcode: string;
   stock: number | string; weight: number | string | null; trackInventory: boolean; continueSelling: boolean; image: string;
+  // optional offer/condition fields (store-owned offers). When undefined the stored values are left untouched.
+  conditionType?: string; cosmeticGrade?: string; functionalStatus?: string; batteryHealth?: number | string | null; batteryCycles?: number | string | null;
+  repairDisclosure?: string; accessories?: string; verification?: string; testedAt?: string; testedBy?: string; testNotes?: string;
+  warrantyProvider?: string; warrantyMonths?: number | string | null; warrantyTerms?: string; returnDays?: number | string | null; returnTerms?: string;
+  handlingDays?: number | string | null; photos?: string[];
 };
 export type ProductInput = {
   id?: string; name: string; nameAr: string; description: string; descriptionAr: string; status: string; categoryId: string;
@@ -42,10 +47,14 @@ export async function saveProduct(input: ProductInput): Promise<SaveResult> {
   input.variants.forEach((v, i) => {
     const p = n(v.price);
     if (p == null || Number.isNaN(p) || p < 0) fe[`variant_${i}_price`] = "Price required";
-    for (const k of ["comparePrice", "cost", "weight", "stock"] as const) {
+    for (const k of ["comparePrice", "cost", "weight", "stock", "batteryCycles", "warrantyMonths", "returnDays", "handlingDays"] as const) {
       const x = n(v[k]);
       if (x != null && (Number.isNaN(x) || x < 0)) fe[`variant_${i}_${k}`] = "Invalid";
     }
+    const bh = n(v.batteryHealth);
+    if (bh != null && (Number.isNaN(bh) || bh < 0 || bh > 100)) fe[`variant_${i}_batteryHealth`] = "0–100";
+    if (v.conditionType && !["NEW", "OPEN_BOX", "REFURBISHED", "USED", "PARTS"].includes(v.conditionType)) fe[`variant_${i}_conditionType`] = "Invalid";
+    if (v.verification === "PLATFORM_VERIFIED" && !(v.testedBy ?? "").trim()) fe[`variant_${i}_testedBy`] = "Verifier name required to mark as verified";
   });
   const slug = slugify(input.slug || name);
   if (!slug) fe.slug = "URL handle is required.";
@@ -77,8 +86,8 @@ export async function saveProduct(input: ProductInput): Promise<SaveResult> {
   await db.productOption.deleteMany({ where: { productId } });
   if (options.length) await db.productOption.createMany({ data: options.map((o, i) => ({ productId, name: o.name, nameAr: o.nameAr.trim(), position: i, values: JSON.stringify(o.values) })) });
 
-  // variants
-  const existing = await db.variant.findMany({ where: { productId } });
+  // variants — the editor manages the STORE's own offers only; marketplace sellers' offers on this product are never touched here
+  const existing = await db.variant.findMany({ where: { productId, sellerId: null } });
   const keep = new Set<string>();
   for (const [i, v] of input.variants.entries()) {
     const vals = [v.option1, v.option2, v.option3].map((x, idx) => (idx < options.length ? x?.trim() || null : null));
@@ -88,6 +97,17 @@ export async function saveProduct(input: ProductInput): Promise<SaveResult> {
       weight: n(v.weight), trackInventory: v.trackInventory, continueSelling: v.continueSelling, image: v.image.trim() || null, position: i,
     };
     const stock = Math.trunc(Number(v.stock) || 0);
+    const s0 = (x: string | undefined) => (x ?? "").trim() || null;
+    if (v.conditionType !== undefined || v.warrantyProvider !== undefined) {
+      const photos = (v.photos ?? []).map((u) => u.trim()).filter((u) => u.startsWith("/") || u.startsWith("https://")).slice(0, 8);
+      Object.assign(fields, {
+        conditionType: s0(v.conditionType), cosmeticGrade: s0(v.cosmeticGrade), functionalStatus: s0(v.functionalStatus), batteryHealth: n(v.batteryHealth), batteryCycles: n(v.batteryCycles),
+        repairDisclosure: s0(v.repairDisclosure), accessories: s0(v.accessories), testedAt: v.testedAt ? new Date(v.testedAt) : null, testedBy: s0(v.testedBy), testNotes: s0(v.testNotes),
+        verification: ["NONE", "SELLER_DECLARED", "PLATFORM_VERIFIED"].includes(v.verification ?? "") ? v.verification : "NONE",
+        warrantyProvider: s0(v.warrantyProvider), warrantyMonths: n(v.warrantyMonths), warrantyTerms: s0(v.warrantyTerms), returnDays: n(v.returnDays), returnTerms: s0(v.returnTerms),
+        handlingDays: n(v.handlingDays) ?? 1, photos: JSON.stringify(photos),
+      });
+    }
     const match = v.id ? existing.find((e) => e.id === v.id) : undefined;
     if (match) {
       keep.add(match.id);
@@ -140,7 +160,7 @@ export async function duplicateProduct(formData: FormData) {
       featured: false, express: src.express,
       images: { create: src.images.map(({ url, alt, position }) => ({ url, alt, position })) },
       options: { create: src.options.map(({ name, nameAr, position, values }) => ({ name, nameAr, position, values })) },
-      variants: { create: src.variants.map(({ title, option1, option2, option3, price, comparePrice, cost, barcode, trackInventory, continueSelling, weight, image, position }) => ({ title, option1, option2, option3, price, comparePrice, cost, barcode, trackInventory, continueSelling, weight, image, position, stock: 0, sku: null })) },
+      variants: { create: src.variants.filter((v) => !v.sellerId).map(({ title, option1, option2, option3, price, comparePrice, cost, barcode, trackInventory, continueSelling, weight, image, position }) => ({ title, option1, option2, option3, price, comparePrice, cost, barcode, trackInventory, continueSelling, weight, image, position, stock: 0, sku: null })) },
       collections: { create: src.collections.map(({ collectionId, position }) => ({ collectionId, position })) },
     },
   });

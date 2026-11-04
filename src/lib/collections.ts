@@ -1,7 +1,7 @@
 import "server-only";
 import type { Collection } from "@prisma/client";
 import { db } from "./db";
-import { productInclude, bestVariant, type CatalogProduct } from "./catalog";
+import { productInclude, bestVariant, listedProducts, type CatalogProduct } from "./catalog";
 
 export type Rule = { field: string; op: string; value: string };
 export const RULE_FIELDS = {
@@ -70,7 +70,7 @@ export async function getCollectionProducts(c: Collection, opts: { includeInacti
   const statusWhere = opts.includeInactive ? {} : { status: "ACTIVE" };
   if (c.type === "SMART") {
     const rules = parseRules(c.rules);
-    const all = await db.product.findMany({ where: statusWhere, include: productInclude });
+    const all = listedProducts(await db.product.findMany({ where: statusWhere, include: productInclude }));
     const matched = rules.length ? all.filter((p) => (c.disjunctive ? rules.some((r) => matchRule(p, r)) : rules.every((r) => matchRule(p, r)))) : [];
     return sortProducts(matched, c.sortOrder === "MANUAL" ? "BEST" : c.sortOrder);
   }
@@ -79,7 +79,7 @@ export async function getCollectionProducts(c: Collection, opts: { includeInacti
     include: { product: { include: productInclude } },
     orderBy: { position: "asc" },
   });
-  return sortProducts(links.map((l) => l.product), c.sortOrder);
+  return sortProducts(listedProducts(links.map((l) => l.product)), c.sortOrder);
 }
 
 /** Collection ids a product belongs to (manual + smart). Used by discounts. */

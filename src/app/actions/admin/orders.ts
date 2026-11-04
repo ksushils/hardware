@@ -1,4 +1,5 @@
 "use server";
+import { postOrderPaidSafe } from "@/lib/ledgerPosting";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
@@ -62,7 +63,10 @@ export async function markDelivered(fd: FormData) {
   });
   await orderEvent(order.id, "delivered", "Order marked as delivered.", user.id);
   await deliverSellerOrdersForOrder(order.id);
-  if (codPaid) await orderEvent(order.id, "paid", `Cash on delivery of AED ${order.total} collected.`, user.id);
+  if (codPaid) {
+    await orderEvent(order.id, "paid", `Cash on delivery of AED ${order.total} collected.`, user.id);
+    await postOrderPaidSafe(order.id); // double-entry ledger: cash collected on delivery
+  }
   await logActivity(user, "delivered", "order", `Marked order ${order.number} delivered`, order.id);
   if (fd.get("notify") !== "off") await sendOrderEmail(updated, "delivered");
   back(order.number, { msg: "Marked as delivered." });

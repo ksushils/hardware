@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { productInclude, bestVariant, rating, availableConditions, visibleWhere } from "@/lib/catalog";
+import { productInclude, bestVariant, rating, availableConditions, visibleWhere, listedProducts } from "@/lib/catalog";
 import { getI18n } from "@/lib/i18n";
 import { aed, loc, parseSpecs, pctOff } from "@/lib/format";
 import { CompareRemove } from "@/components/Compare";
@@ -13,7 +13,7 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
   const { t, locale } = await getI18n();
   const ar = locale === "ar";
   const slugs = (p ?? "").split(",").filter(Boolean).slice(0, 4);
-  const products = slugs.length ? await db.product.findMany({ where: { ...visibleWhere, slug: { in: slugs } }, include: productInclude }) : [];
+  const products = slugs.length ? listedProducts(await db.product.findMany({ where: { ...visibleWhere, slug: { in: slugs } }, include: productInclude })) : [];
   const ordered = slugs.map((s) => products.find((x) => x.slug === s)).filter((x): x is NonNullable<typeof x> => !!x);
   if (!ordered.length)
     return <div className="container-x py-20 text-center"><h1 className="text-3xl font-black">{ar ? "مقارنة المنتجات" : "Compare products"}</h1><p className="mt-2 text-slate-600">{ar ? "اضغط \"قارن\" على أي منتج لإضافته (حتى 4)." : "Tap “Compare” on any product to add it (up to 4)."}</p><Link href="/search" className="btn-primary mt-6">{t.common.allProducts}</Link></div>;

@@ -31,6 +31,7 @@ export default async function EditProductPage({ params, searchParams }: { params
       db.product.findFirst({ where: { createdAt: { gt: product.createdAt } }, orderBy: { createdAt: "asc" }, select: { id: true } }),
     ]),
   ]);
+  const sellerOffers = await db.variant.findMany({ where: { productId: id, sellerId: { not: null } }, include: { seller: { select: { id: true, shopName: true } } }, orderBy: { position: "asc" } });
   const smartTitles = full ? smart.filter((c) => { const r = parseRules(c.rules); return r.length && (c.disjunctive ? r.some((x) => matchRule(full, x)) : r.every((x) => matchRule(full, x))); }).map((c) => c.title) : [];
 
   return (
@@ -51,6 +52,15 @@ export default async function EditProductPage({ params, searchParams }: { params
       />
       {sp.saved && <div className="mb-4 rounded-lg bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">Product saved.</div>}
       {sp.duplicated && <div className="mb-4 rounded-lg bg-sky-50 px-4 py-2.5 text-sm text-sky-800">Product duplicated as a draft. SKUs and stock were cleared.</div>}
+      {sellerOffers.length > 0 && (
+        <div className="mb-4 rounded-xl border border-violet-200 bg-violet-50 p-4 text-sm">
+          <p className="font-semibold text-violet-900">🏪 {sellerOffers.length} marketplace offer(s) on this product</p>
+          <p className="text-xs text-violet-800">Sellers manage their own price, stock and terms. They are not edited in this form and are not deleted when you save. Moderate them under <Link href="/admin/sellers/products" className="underline">Marketplace approvals</Link>.</p>
+          <ul className="mt-2 space-y-0.5 text-xs">
+            {sellerOffers.map((o) => <li key={o.id}>{o.seller?.shopName} · {o.title === "Default Title" ? "Default" : o.title} · AED {o.price} · {o.stock} in stock · <StatusBadge status={o.approvalStatus} /></li>)}
+          </ul>
+        </div>
+      )}
       <ProductEditor key={product.updatedAt.toISOString()} initial={input} categories={categories} collections={collections} smartCollections={smartTitles} storeHost={storeHost()} />
     </>
   );

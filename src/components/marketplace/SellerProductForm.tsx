@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { useFormAction } from "@/hooks/useFormAction";
 import { saveSellerProduct } from "@/app/actions/seller";
+import OfferTermsFields, { type OfferTermsInitial } from "./OfferTermsFields";
 
 type Opt = { name: string; nameAr: string; values: string[] };
 type Var = { option1: string | null; option2: string | null; option3: string | null; price: number | string; comparePrice: number | string | null; stock: number | string; sku: string };
@@ -11,7 +12,7 @@ export type SellerProductInitial = {
 };
 const CONDITIONS = ["Brand New", "Excellent", "Very Good", "Good"];
 
-export default function SellerProductForm({ initial, categories }: { initial: SellerProductInitial; categories: { id: string; name: string }[] }) {
+export default function SellerProductForm({ initial, categories, terms, minReturnDays, locked = false }: { initial: SellerProductInitial; categories: { id: string; name: string }[]; terms: OfferTermsInitial; minReturnDays: number; locked?: boolean }) {
   const { state, pending, formProps } = useFormAction(saveSellerProduct);
   const [images, setImages] = useState(initial.images);
   const [specs, setSpecs] = useState<[string, string][]>(Object.entries(initial.specs).length ? Object.entries(initial.specs) : [["", ""]]);
@@ -28,7 +29,8 @@ export default function SellerProductForm({ initial, categories }: { initial: Se
     return combos.map((c) => [c[0] ?? null, c[1] ?? null, c[2] ?? null]);
   }, [options]);
   const key = (a: (string | null)[]) => a.map((x) => x ?? "").join("|");
-  const rows: Var[] = matrix.map((m) => variants.find((v) => key([v.option1, v.option2, v.option3]) === key(m)) ?? { option1: m[0], option2: m[1], option3: m[2], price: "", comparePrice: "", stock: 0, sku: "" });
+  // when the product page is locked (shared with other sellers) only the seller's own offers are listed
+  const rows: Var[] = locked ? variants : matrix.map((m) => variants.find((v) => key([v.option1, v.option2, v.option3]) === key(m)) ?? { option1: m[0], option2: m[1], option3: m[2], price: "", comparePrice: "", stock: 0, sku: "" });
   const setRow = (i: number, patch: Partial<Var>) => {
     const r = { ...rows[i], ...patch };
     setVariants([...variants.filter((v) => key([v.option1, v.option2, v.option3]) !== key([r.option1, r.option2, r.option3])), r]);
@@ -43,20 +45,22 @@ export default function SellerProductForm({ initial, categories }: { initial: Se
       <input type="hidden" name="options" value={JSON.stringify(options)} />
       <input type="hidden" name="variants" value={JSON.stringify(rows)} />
       {initial.approvalStatus === "REJECTED" && initial.rejectionReason && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700"><b>Changes requested:</b> {initial.rejectionReason}</p>}
-      {initial.approvalStatus === "APPROVED" && <p className="rounded-lg bg-sky-50 p-3 text-sm text-sky-800">This product is live. Price and stock changes go live instantly; changes to content, images or options are re-reviewed by the marketplace team.</p>}
+      {locked && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">This product page is shared with other sellers, so its title, description, images and options can only be changed by the marketplace team. You can edit your own prices, stock and terms below.</p>}
+      {initial.approvalStatus === "APPROVED" && !locked && <p className="rounded-lg bg-sky-50 p-3 text-sm text-sky-800">This product is live. Price and stock changes go live instantly; changes to content, images or options are re-reviewed by the marketplace team.</p>}
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="mb-3 text-sm font-semibold">Product details</h2>
         <div className="grid gap-3 md:grid-cols-2">
-          <label><span className="label">Title (English)</span><input name="name" defaultValue={initial.name} required className="in-a" /></label>
-          <label><span className="label">Title (Arabic)</span><input name="nameAr" defaultValue={initial.nameAr} dir="rtl" className="in-a" /></label>
-          <label><span className="label">Description (English)</span><textarea name="description" defaultValue={initial.description} rows={5} required className="in-a" /></label>
-          <label><span className="label">Description (Arabic)</span><textarea name="descriptionAr" defaultValue={initial.descriptionAr} rows={5} dir="rtl" className="in-a" /></label>
-          <label><span className="label">Category</span><select name="categoryId" defaultValue={initial.categoryId} required className="in-a"><option value="">Choose…</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-          <label><span className="label">Brand</span><input name="brand" defaultValue={initial.brand} required className="in-a" /></label>
-          <label><span className="label">Product type</span><input name="productType" defaultValue={initial.productType} placeholder="e.g. Graphics Card" className="in-a" /></label>
-          <label><span className="label">Brand-new reference price (AED)</span><input name="priceNew" type="number" step="0.01" defaultValue={initial.priceNew || ""} placeholder="Shown as “x% vs new”" className="in-a" /></label>
-          <label className="md:col-span-2"><span className="label">Tags (comma separated)</span><input name="tags" defaultValue={initial.tags} className="in-a" /></label>
+          <label><span className="label">Title (English)</span><input readOnly={locked} name="name" defaultValue={initial.name} required className="in-a" /></label>
+          <label><span className="label">Title (Arabic)</span><input readOnly={locked} name="nameAr" defaultValue={initial.nameAr} dir="rtl" className="in-a" /></label>
+          <label><span className="label">Description (English)</span><textarea readOnly={locked} name="description" defaultValue={initial.description} rows={5} required className="in-a" /></label>
+          <label><span className="label">Description (Arabic)</span><textarea readOnly={locked} name="descriptionAr" defaultValue={initial.descriptionAr} rows={5} dir="rtl" className="in-a" /></label>
+          {locked && <input type="hidden" name="categoryId" value={initial.categoryId} />}
+          <label><span className="label">Category</span><select name="categoryId" defaultValue={initial.categoryId} required disabled={locked} className="in-a"><option value="">Choose…</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+          <label><span className="label">Brand</span><input readOnly={locked} name="brand" defaultValue={initial.brand} required className="in-a" /></label>
+          <label><span className="label">Product type</span><input readOnly={locked} name="productType" defaultValue={initial.productType} placeholder="e.g. Graphics Card" className="in-a" /></label>
+          <label><span className="label">Brand-new reference price (AED)</span><input readOnly={locked} name="priceNew" type="number" step="0.01" defaultValue={initial.priceNew || ""} placeholder="Shown as “x% vs new”" className="in-a" /></label>
+          <label className="md:col-span-2"><span className="label">Tags (comma separated)</span><input readOnly={locked} name="tags" defaultValue={initial.tags} className="in-a" /></label>
         </div>
       </section>
 
@@ -75,7 +79,7 @@ export default function SellerProductForm({ initial, categories }: { initial: Se
             </div>
           ))}
         </div>
-        <input type="file" name="newImages" accept="image/*" multiple className="mt-3 text-sm" />
+        {!locked && <input type="file" name="newImages" accept="image/*" multiple className="mt-3 text-sm" />}
         <p className="mt-1 text-xs text-slate-500">Use real photos of the unit you&apos;re selling. JPG/PNG/WebP up to 25MB each.</p>
       </section>
 
@@ -94,9 +98,9 @@ export default function SellerProductForm({ initial, categories }: { initial: Se
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="mb-1 text-sm font-semibold">Options & variants</h2>
+        <h2 className="mb-1 text-sm font-semibold">{locked ? "Your offers (variants)" : "Options & variants"}</h2>
         <p className="mb-3 text-xs text-slate-500">Most listings use one option, &quot;Condition&quot;. Add &quot;Capacity&quot; or &quot;Color&quot; if you stock several versions.</p>
-        <div className="space-y-3">
+        <div className={locked ? "hidden" : "space-y-3"}>
           {options.map((o, i) => (
             <div key={i} className="rounded-lg border border-slate-200 p-3">
               <div className="flex flex-wrap gap-2">
@@ -135,6 +139,8 @@ export default function SellerProductForm({ initial, categories }: { initial: Se
           </table>
         </div>
       </section>
+
+      <OfferTermsFields initial={terms} minReturnDays={minReturnDays} />
 
       {state?.error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{state.error}</p>}
       <div className="sticky bottom-0 flex gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">

@@ -27,5 +27,8 @@ export function rateLimit(key: string, limit: number, windowSec: number) {
 /** Convenience: limit per client IP (and optionally per identifier such as an email). */
 export async function limitByIp(action: string, limit: number, windowSec: number, id?: string) {
   const ip = await clientIp();
-  return rateLimit(`${action}:${ip}`, limit, windowSec) && (id ? rateLimit(`${action}:id:${id.toLowerCase()}`, limit, windowSec) : true);
+  // Without a usable client IP (proxy not forwarding it) never lump everyone into one shared bucket: limit per identifier only.
+  const ipOk = ip === "unknown" ? true : rateLimit(`${action}:${ip}`, limit, windowSec);
+  const idOk = id ? rateLimit(`${action}:id:${id.toLowerCase()}`, limit, windowSec) : true;
+  return ipOk && idOk;
 }

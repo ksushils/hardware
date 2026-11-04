@@ -6,6 +6,12 @@ import { siteUrl } from "./site";
 
 export { siteUrl };
 export const stripeEnabled = () => !!process.env.STRIPE_SECRET_KEY;
+/**
+ * The built-in demo card page (test cards only, no real money). It stays ON while no Stripe key is set so the site can be tested.
+ * Set DISABLE_DEMO_PAYMENTS=1 to switch it off for real trading; card checkout is then hidden until Stripe is connected.
+ */
+export const demoPaymentsEnabled = () => !stripeEnabled() && process.env.DISABLE_DEMO_PAYMENTS !== "1";
+export const cardPaymentsAvailable = () => stripeEnabled() || demoPaymentsEnabled();
 let _stripe: Stripe | null = null;
 export function stripe() {
   if (!_stripe) _stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);

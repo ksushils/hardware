@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveProduct, type ProductInput, type VariantInput } from "@/app/actions/admin/products";
 
@@ -205,7 +205,8 @@ export default function ProductEditor({ initial, categories, collections, smartC
                     const margin = price > 0 && v.cost !== "" && v.cost != null ? Math.round(((price - cost) / price) * 100) : null;
                     const cell = (k: keyof VariantInput) => `w-full rounded border px-2 py-1 text-sm ${errors[`variant_${i}_${k}`] ? "border-red-400" : "border-slate-300"}`;
                     return (
-                      <tr key={keyOf(v) + i} className="align-top">
+                      <Fragment key={keyOf(v) + i}>
+                      <tr className="align-top">
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-2">
                             <select className="w-12 rounded border border-slate-300 p-0.5 text-[10px]" value={v.image} onChange={(e) => setVariant(i, { image: e.target.value })} title="Variant image">
@@ -227,6 +228,37 @@ export default function ProductEditor({ initial, categories, collections, smartC
                         <td className="px-2 py-2 text-center"><input type="checkbox" checked={v.trackInventory} onChange={(e) => setVariant(i, { trackInventory: e.target.checked })} /></td>
                         <td className="px-2 py-2 text-center"><input type="checkbox" checked={v.continueSelling} onChange={(e) => setVariant(i, { continueSelling: e.target.checked })} /></td>
                       </tr>
+                      <tr><td colSpan={10} className="bg-slate-50/60 px-3 pb-3">
+                        <details>
+                          <summary className="cursor-pointer py-1.5 text-xs font-semibold text-slate-600">Condition, evidence &amp; terms for “{title}” (shown to buyers, with who stands behind each point)</summary>
+                          <div className="grid gap-2 pt-2 md:grid-cols-4">
+                            {([
+                              ["Commercial condition", "conditionType", "select-condition"], ["Cosmetic grade", "cosmeticGrade", "text"], ["Functional status", "functionalStatus", "text"],
+                              ["Battery health %", "batteryHealth", "number"], ["Battery cycles", "batteryCycles", "number"], ["Included accessories", "accessories", "text"],
+                              ["Tested on", "testedAt", "date"], ["Tested / verified by", "testedBy", "text"], ["Test notes", "testNotes", "text"],
+                              ["Warranty provider", "warrantyProvider", "select-warranty"], ["Warranty months", "warrantyMonths", "number"], ["Return days (blank = store standard)", "returnDays", "number"],
+                              ["Dispatch (business days)", "handlingDays", "number"], ["Evidence level", "verification", "select-verification"],
+                            ] as [string, keyof VariantInput, string][]).map(([label, key, kind]) => (
+                              <label key={key} className="block text-[11px] text-slate-500">{label}
+                                {kind === "select-condition" ? (
+                                  <select className={cell(key)} value={(v[key] as string) ?? ""} onChange={(e) => setVariant(i, { [key]: e.target.value })}><option value="">(derive from option)</option><option value="NEW">Brand new</option><option value="OPEN_BOX">Open box</option><option value="REFURBISHED">Refurbished</option><option value="USED">Used</option><option value="PARTS">Parts only</option></select>
+                                ) : kind === "select-warranty" ? (
+                                  <select className={cell(key)} value={(v[key] as string) ?? ""} onChange={(e) => setVariant(i, { [key]: e.target.value })}><option value="">(store default)</option><option value="KARAT">TechRevive warranty</option><option value="MANUFACTURER">Manufacturer warranty</option><option value="NONE">No warranty</option></select>
+                                ) : kind === "select-verification" ? (
+                                  <select className={cell(key)} value={(v[key] as string) ?? "NONE"} onChange={(e) => setVariant(i, { [key]: e.target.value })}><option value="NONE">None</option><option value="SELLER_DECLARED">Declared by store</option><option value="PLATFORM_VERIFIED">Verified by TechRevive</option></select>
+                                ) : (
+                                  <input type={kind} className={cell(key)} value={(v[key] as string | number | null) ?? ""} onChange={(e) => setVariant(i, { [key]: e.target.value })} />
+                                )}
+                              </label>
+                            ))}
+                            <label className="block text-[11px] text-slate-500 md:col-span-2">Repairs &amp; replaced parts<input className={cell("repairDisclosure")} value={v.repairDisclosure ?? ""} onChange={(e) => setVariant(i, { repairDisclosure: e.target.value })} /></label>
+                            <label className="block text-[11px] text-slate-500 md:col-span-2">Warranty terms<input className={cell("warrantyTerms")} value={v.warrantyTerms ?? ""} onChange={(e) => setVariant(i, { warrantyTerms: e.target.value })} /></label>
+                            <label className="block text-[11px] text-slate-500 md:col-span-2">Extra return terms<input className={cell("returnTerms")} value={v.returnTerms ?? ""} onChange={(e) => setVariant(i, { returnTerms: e.target.value })} /></label>
+                            <label className="block text-[11px] text-slate-500 md:col-span-2">Photos of this exact unit (one URL per line)<textarea rows={2} className={cell("photos")} value={(v.photos ?? []).join("\n")} onChange={(e) => setVariant(i, { photos: e.target.value.split("\n").map((x) => x.trim()).filter(Boolean) })} /></label>
+                          </div>
+                        </details>
+                      </td></tr>
+                      </Fragment>
                     );
                   })}
                 </tbody>

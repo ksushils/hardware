@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { productInclude, bestVariant } from "@/lib/catalog";
+import { productInclude, bestVariant, listedProducts } from "@/lib/catalog";
 import { getI18n } from "@/lib/i18n";
 import { aed, loc, pctOff } from "@/lib/format";
 import { isAvailable } from "@/lib/inventory";
@@ -13,7 +13,9 @@ export const metadata = { title: "Wishlist" };
 export default async function WishlistPage() {
   const user = await requireUser("/account/wishlist");
   const { t, locale } = await getI18n();
-  const items = await db.wishlistItem.findMany({ where: { userId: user.id }, include: { product: { include: productInclude } }, orderBy: { id: "desc" } });
+  const rawItems = await db.wishlistItem.findMany({ where: { userId: user.id }, include: { product: { include: productInclude } }, orderBy: { id: "desc" } });
+  // hide offers that are no longer listed (suspended seller, unapproved, vacation)
+  const items = rawItems.flatMap((i) => { const [p] = listedProducts([i.product]); return p ? [{ ...i, product: p }] : []; });
   if (!items.length) return <p className="card p-10 text-center text-slate-500">{t.wishlist.empty}</p>;
   const availableIds = items.filter((i) => i.product.variants.some(isAvailable)).map((i) => i.productId);
   return (

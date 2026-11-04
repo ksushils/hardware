@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { canViewOrder, getOrder } from "@/lib/orders";
-import { stripeEnabled } from "@/lib/payments";
+import { demoPaymentsEnabled, stripeEnabled } from "@/lib/payments";
 import { aed } from "@/lib/format";
 import { getI18n, fmt } from "@/lib/i18n";
 import DemoCardForm from "./DemoCardForm";
@@ -13,7 +13,7 @@ export default async function PayPage({ params, searchParams }: { params: Promis
   const { t, locale } = await getI18n();
   const order = await getOrder(number);
   if (!order || !(await canViewOrder(order, k))) notFound();
-  if (order.paymentStatus === "PAID" || stripeEnabled()) redirect(`/order/${number}${k ? `?k=${k}` : ""}`);
+  if (order.paymentStatus === "PAID" || stripeEnabled() || !demoPaymentsEnabled()) redirect(`/order/${number}${k ? `?k=${k}` : ""}`);
   return (
     <div className="container-x max-w-lg py-12">
       <div className="card p-6">

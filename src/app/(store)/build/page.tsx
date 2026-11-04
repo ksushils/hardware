@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
-import { visibleWhere } from "@/lib/catalog";
+import { visibleWhere, listedVariantWhere } from "@/lib/catalog";
+import { offerListed } from "@/lib/offers";
 import { getI18n } from "@/lib/i18n";
 import { parseSpecs } from "@/lib/format";
 import { isAvailable } from "@/lib/inventory";
@@ -30,11 +31,11 @@ export default async function BuildPage({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const products = await db.product.findMany({
     where: { ...visibleWhere, category: { slug: { in: SLOTS.map((s) => s.cat) } } },
-    include: { variants: { orderBy: { price: "asc" } }, category: true },
+    include: { variants: { where: listedVariantWhere, orderBy: { price: "asc" }, include: { seller: true } }, category: true },
   });
   const data: BuilderProduct[] = products.map((p) => ({
     id: p.id, slug: p.slug, name: p.name, nameAr: p.nameAr, brand: p.brand, image: p.image, cat: p.category.slug, priceNew: p.priceNew, specs: parseSpecs(p.specs),
-    variants: p.variants.filter(isAvailable).map((v) => ({ id: v.id, title: v.title, price: v.price })),
+    variants: p.variants.filter((v) => offerListed(v) && isAvailable(v)).map((v) => ({ id: v.id, title: v.seller ? `${v.title} · ${v.seller.shopName}` : v.title, price: v.price })),
   })).filter((p) => p.variants.length);
   const initial: Record<string, string> = {};
   for (const s of SLOTS) if (sp[s.key]) initial[s.key] = sp[s.key];

@@ -4,6 +4,7 @@ import { orderEvent, logActivity } from "@/lib/activity";
 import { restock } from "@/lib/orders";
 import { refundPayment } from "@/lib/payments";
 import { sendOrderEmail } from "@/lib/emails";
+import { postRefundSafe } from "@/lib/ledgerPosting";
 
 /** Shared refund logic used by the order page and returns. Returns an error string or null. */
 export async function performRefund(
@@ -35,7 +36,8 @@ export async function performRefund(
     if (!res.ok) return `Payment provider refused the refund: ${res.error}`;
     ref = res.ref;
   }
-  await db.refund.create({ data: { orderId, amount, reason: reason || null, restock: items.length > 0 } });
+  const refundRow = await db.refund.create({ data: { orderId, amount, reason: reason || null, restock: items.length > 0 } });
+  if (amount > 0) await postRefundSafe(refundRow.id, orderId); // double-entry ledger
   const refundedAmount = Math.round((order.refundedAmount + amount) * 100) / 100;
   const paymentStatus = amount > 0 ? (refundedAmount >= order.total - 0.005 ? "REFUNDED" : "PARTIALLY_REFUNDED") : order.paymentStatus;
   const updated = await db.order.update({ where: { id: orderId }, data: { refundedAmount, paymentStatus }, include: { items: true } });

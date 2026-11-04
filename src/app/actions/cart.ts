@@ -68,9 +68,13 @@ export async function moveWishlistToCart(formData: FormData) {
   if (!user) redirect("/login?next=/account/wishlist");
   const productIds = formData.getAll("productId").map(String);
   for (const productId of productIds) {
-    const variants = await db.variant.findMany({ where: { productId }, orderBy: { price: "asc" } });
-    const chosen = variants.find((v) => maxQty(v) > 0);
-    if (chosen && (await addEntry(chosen.id, 1))) await db.wishlistItem.deleteMany({ where: { userId: user.id, productId } });
+    // cheapest approved, in-stock offer from a seller that can currently sell (addEntry re-validates everything)
+    const variants = await db.variant.findMany({ where: { productId, approvalStatus: "APPROVED" }, orderBy: { price: "asc" } });
+    let added = false;
+    for (const v of variants.filter((x) => maxQty(x) > 0)) {
+      if (await addEntry(v.id, 1)) { added = true; break; }
+    }
+    if (added) await db.wishlistItem.deleteMany({ where: { userId: user.id, productId } });
   }
   revalidatePath("/", "layout");
   if (formData.get("go") === "cart") redirect("/cart?added=1");

@@ -7,17 +7,21 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { clearCart, getCartDetails, readCart } from "@/lib/cart";
-import { computeTotals, warrantyPrice } from "@/lib/pricing";
+import { computeTotals, lineTotal, warrantyPrice } from "@/lib/pricing";
 import { EMIRATES } from "@/lib/format";
 import { getI18n } from "@/lib/i18n";
 import { getSettings, pricingConfig } from "@/lib/settings";
 import { availableRates } from "@/lib/shipping";
 import { bestAutomaticDiscount, evaluateDiscount, findCodeDiscount, type AppliedDiscount } from "@/lib/discounts";
 import { canViewOrder, cancelOrderInternal, markOrderPaid, newOrderNumber, rememberOrder } from "@/lib/orders";
-import { createStripeCheckout, luhn, stripeEnabled } from "@/lib/payments";
+import { cardPaymentsAvailable, createStripeCheckout, demoPaymentsEnabled, luhn, stripeEnabled } from "@/lib/payments";
 import { orderEvent } from "@/lib/activity";
 import { sendOrderEmail } from "@/lib/emails";
-import { createSellerOrders } from "@/lib/marketplace";
+import { createSellerOrders, type SellerShipmentMeta } from "@/lib/marketplace";
+import { blockedMessage, resolveCheckoutCart } from "@/lib/shipments";
+import { buildShipments, type StoreRate } from "@/lib/shipmentMath";
+import { offerSnapshots } from "@/lib/offerSnapshots";
+import { OutOfStockError, reserveStock } from "@/lib/stock";
 import type { FormState } from "./auth";
 
 async function cartLines() {
@@ -77,7 +81,7 @@ export async function placeOrder(_: FormState, formData: FormData): Promise<Form
     street: z.string().trim().min(2, t.checkout.street),
     building: z.string().trim().min(1, t.checkout.building),
     notes: z.string().trim().max(500).optional(),
-    rateId: z.string().min(1, t.checkout.noRates),
+    rateId: z.string().optional(), // required only when the cart has store-sold items
     paymentMethod: z.enum(["CARD", "COD"]),
     discountCode: z.string().optional(),
     giftCardCode: z.string().optional(),
@@ -88,11 +92,17 @@ export async function placeOrder(_: FormState, formData: FormData): Promise<Form
   const user = await getUser();
   if (!user && !s.checkout.guestCheckout) redirect("/login?next=/checkout");
   if (data.paymentMethod === "COD" && !s.checkout.codEnabled) return { error: "COD disabled" };
+  if (data.paymentMethod === "CARD" && !cardPaymentsAvailable()) return { error: locale === "ar" ? "الدفع بالبطاقة غير متاح حاليًا. يرجى اختيار الدفع عند الاستلام." : "Card payments are not available right now. Please choose cash on delivery." };
   if (data.paymentMethod === "CARD" && !s.checkout.cardEnabled) return { error: "Card disabled" };
 
-  const { items, lines } = await cartLines();
+  // Cart → purchasable lines. Offers hidden since they were added (moderation, suspended/vacationing seller, sold out) block checkout.
+  const cart = await getCartDetails();
+  const resolved = await resolveCheckoutCart(cart.items, cart.entries);
+  if (resolved.blocked.length) return { error: blockedMessage(resolved.blocked, locale === "ar") };
+  const items = resolved.items;
   if (!items.length) return { error: t.cart.empty };
   if (items.some((i) => i.quantity < i.requested)) return { error: t.cart.limited.replace("{n}", "") };
+  const lines = items.map((i) => ({ productId: i.product.id, price: i.variant.price, quantity: i.quantity }));
   const email = user?.email ?? data.email;
 
   // discounts: explicit code, else best automatic
@@ -104,12 +114,24 @@ export async function placeOrder(_: FormState, formData: FormData): Promise<Form
     applied = r.applied;
   } else applied = await bestAutomaticDiscount(lines, email);
 
+  // Shipments: the store ships its own items as one parcel (delivery rate chosen by the buyer); each seller ships theirs separately.
+  // Everything is recomputed here from the database; nothing about fees or ETAs is trusted from the browser.
   const priced = items.map((i) => ({ price: i.variant.price, quantity: i.quantity, warranty: i.warranty }));
-  const preSubtotal = computeTotals(priced, { cfg }).subtotal - (applied?.amount ?? 0);
-  const allExpress = items.every((i) => i.product.express);
-  const rates = await availableRates(data.emirate, preSubtotal, allExpress);
-  const rate = rates.find((r) => r.id === data.rateId);
-  if (!rate) return { error: t.checkout.noRates };
+  const cartSubtotal = computeTotals(priced, { cfg }).subtotal;
+  const discountAmount = Math.min(applied?.amount ?? 0, cartSubtotal);
+  const shipItems = items.map((i) => ({ sellerId: i.variant.sellerId, price: i.variant.price, quantity: i.quantity, warranty: i.warranty, handlingDays: i.variant.handlingDays, express: i.product.express }));
+  const storeIdx = shipItems.map((x, i) => (x.sellerId ? -1 : i)).filter((i) => i >= 0);
+  let rate: StoreRate | null = null;
+  if (storeIdx.length) {
+    const storeSub = storeIdx.reduce((sum, i) => sum + lineTotal(shipItems[i], cfg), 0);
+    const share = cartSubtotal > 0 ? (cartSubtotal - discountAmount) / cartSubtotal : 1;
+    const rates = await availableRates(data.emirate, Math.round(storeSub * share * 100) / 100, storeIdx.every((i) => shipItems[i].express));
+    const found = rates.find((r) => r.id === data.rateId);
+    if (!found) return { error: t.checkout.noRates };
+    rate = { id: found.id, name: found.name, nameAr: found.nameAr, price: found.price, freeAbove: found.freeAbove, deliveryDays: found.deliveryDays, expressOnly: found.expressOnly };
+  }
+  const shipments = buildShipments(shipItems, resolved.sellers, { cfg, carrier: { min: s.delivery.carrierMinDays, max: s.delivery.carrierMaxDays }, rate, discount: discountAmount, freeShipping: applied?.freeShipping });
+  const shipmentMeta = new Map<string, SellerShipmentMeta>(shipments.filter((x) => x.kind === "SELLER" && x.sellerId).map((x) => [x.sellerId!, { shippingFee: x.fee, etaMinDays: x.etaMin, etaMaxDays: x.etaMax }]));
 
   let gift: { code: string; balance: number } | null = null;
   if (data.giftCardCode) {
@@ -117,23 +139,14 @@ export async function placeOrder(_: FormState, formData: FormData): Promise<Form
     if (g.error || !g.code) return { error: g.error };
     gift = { code: g.code, balance: g.balance! };
   }
-  const totals = computeTotals(priced, { cfg, rate, paymentMethod: data.paymentMethod, discount: applied?.amount, freeShipping: applied?.freeShipping, giftCardBalance: gift?.balance });
+  const totals = computeTotals(priced, { cfg, paymentMethod: data.paymentMethod, discount: applied?.amount, freeShipping: applied?.freeShipping, giftCardBalance: gift?.balance, shipmentFees: shipments.map((x) => x.fee) });
   if (data.paymentMethod === "COD" && totals.total > s.checkout.codMax) return { error: t.checkout.codSub.replace("{amount}", `AED ${s.checkout.codMax}`) };
   const fullyCoveredByGiftCard = totals.total <= 0 && totals.giftCard > 0;
 
   let order;
   try {
     order = await db.$transaction(async (tx) => {
-      for (const i of items) {
-        if (!i.variant.trackInventory) continue;
-        if (i.variant.continueSelling) {
-          await tx.variant.update({ where: { id: i.variant.id }, data: { stock: { decrement: i.quantity } } });
-        } else {
-          const res = await tx.variant.updateMany({ where: { id: i.variant.id, stock: { gte: i.quantity } }, data: { stock: { decrement: i.quantity } } });
-          if (res.count === 0) throw new Error(`${i.product.name}: ${t.common.soldOut}`);
-        }
-        await tx.inventoryAdjustment.create({ data: { variantId: i.variant.id, delta: -i.quantity, reason: "sold" } });
-      }
+      await reserveStock(tx, items.map((i) => ({ variantId: i.variant.id, quantity: i.quantity, trackInventory: i.variant.trackInventory, continueSelling: i.variant.continueSelling, label: i.product.name })));
       if (gift && totals.giftCard > 0) {
         const r = await tx.giftCard.updateMany({ where: { code: gift.code, balance: { gte: totals.giftCard } }, data: { balance: { decrement: totals.giftCard } } });
         if (r.count === 0) throw new Error(t.checkout.errors.giftInvalid);
@@ -145,13 +158,16 @@ export async function placeOrder(_: FormState, formData: FormData): Promise<Form
           paymentMethod: fullyCoveredByGiftCard ? "GIFT_CARD" : data.paymentMethod,
           subtotal: totals.subtotal, discount: totals.discount, discountCode: applied ? (applied.code ?? applied.title) : null, discountTitle: applied?.title,
           shipping: totals.shipping, codFee: totals.codFee, giftCardCode: gift?.code, giftCardAmount: totals.giftCard, vat: totals.vat, total: totals.total,
-          shippingRateName: rate.name, express: rate.expressOnly,
+          shippingRateName: rate?.name ?? "Seller shipping", express: rate?.expressOnly ?? false,
           fullName: data.fullName, phone: data.phone, emirate: data.emirate, area: data.area, street: data.street, building: data.building, customerNote: data.notes || null,
           items: {
             create: items.map((i) => ({
               variantId: i.variant.id, productId: i.product.id, name: `${i.product.brand} ${i.product.name}`, variantTitle: i.variant.title === "Default Title" ? "" : i.variant.title,
               sku: i.variant.sku, image: i.product.image, price: i.variant.price, cost: i.variant.cost, quantity: i.quantity, warranty: i.warranty,
               warrantyPrice: i.warranty ? warrantyPrice(i.variant.price, cfg) : 0,
+              // who sells it and exactly what was promised (condition evidence, warranty, returns) — immutable after checkout
+              sellerId: i.variant.sellerId,
+              ...offerSnapshots(i.variant, i.variant.sellerId ? { shopName: resolved.sellers[i.variant.sellerId]?.name ?? "Seller" } : null, { warrantyMonths: s.warranty.months, returnDays: s.returnsDays, storeName: s.storeName }),
             })),
           },
         },
@@ -159,10 +175,11 @@ export async function placeOrder(_: FormState, formData: FormData): Promise<Form
       });
     });
   } catch (err) {
+    if (err instanceof OutOfStockError) return { error: `${err.label}: ${t.common.soldOut}` };
     return { error: err instanceof Error ? err.message : "Could not place order." };
   }
-  await orderEvent(order.id, "placed", `Order placed on the online store (${order.paymentMethod}, ${rate.name}).`);
-  await createSellerOrders(order).catch((err) => console.error("seller split failed", err));
+  await orderEvent(order.id, "placed", `Order placed on the online store (${order.paymentMethod}, ${shipments.length > 1 ? `${shipments.length} shipments` : rate?.name ?? "seller shipping"}).`);
+  await createSellerOrders(order, shipmentMeta).catch((err) => console.error("seller split failed", err));
 
   if (user && formData.get("saveAddress") === "on") {
     const exists = await db.address.findFirst({ where: { userId: user.id, street: data.street, building: data.building } });
@@ -201,6 +218,7 @@ export async function retryPayment(formData: FormData) {
   const order = await db.order.findUnique({ where: { number }, include: { items: true } });
   if (!order || !(await canViewOrder(order, String(formData.get("k") || ""))) || order.paymentStatus === "PAID" || order.status === "CANCELLED") redirect("/");
   if (stripeEnabled()) redirect(await createStripeCheckout(order));
+  if (!demoPaymentsEnabled()) redirect(`/order/${number}`);
   redirect(`/checkout/pay/${number}`);
 }
 
@@ -215,7 +233,7 @@ export async function cancelOrder(formData: FormData) {
 
 /** Built-in demo card gateway (no Stripe key). 4242 4242 4242 4242 succeeds, 4000 0000 0000 0002 declines. */
 export async function payWithDemoCard(_: FormState, formData: FormData): Promise<FormState> {
-  if (stripeEnabled()) return { error: "Demo gateway is disabled." };
+  if (!demoPaymentsEnabled()) return { error: "Demo gateway is disabled." };
   const { locale } = await getI18n();
   const ar = locale === "ar";
   const number = String(formData.get("number"));

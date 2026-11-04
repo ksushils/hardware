@@ -1,4 +1,5 @@
 "use server";
+import { postOrderPaidSafe } from "@/lib/ledgerPosting";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -11,6 +12,8 @@ import { siteUrl } from "@/lib/site";
 import { orderEvent } from "@/lib/activity";
 import { creditSellerEarnings, sellerBalance } from "@/lib/marketplace";
 import { slugify } from "@/lib/format";
+import { parseOfferTerms, termsChanged, termsData } from "@/lib/offerTerms";
+import { collectPhotos } from "@/lib/offerPhotos";
 
 type FormState = { error?: string; ok?: string } | undefined;
 type VariantIn = { option1: string | null; option2: string | null; option3: string | null; price: number; comparePrice: number | null; stock: number; sku: string };
@@ -28,7 +31,11 @@ const productSchema = z.object({
   tags: z.string().trim().default(""),
 });
 
-/** Create or update a product owned by the current seller. */
+/**
+ * Create or update a NEW product proposal owned by the current seller, together with the seller's own offers (variants) on it.
+ * Content of an approved product that other sellers also sell is locked (only moderators change canonical content);
+ * the seller can still edit their own offers on it.
+ */
 export async function saveSellerProduct(_: FormState, fd: FormData): Promise<FormState> {
   const { seller } = await requireSeller();
   const settings = await getSettings();
@@ -37,23 +44,33 @@ export async function saveSellerProduct(_: FormState, fd: FormData): Promise<For
   const d = parsed.data;
   if (!(await db.category.findUnique({ where: { id: d.categoryId } }))) return { error: "Unknown category" };
 
+  const id = String(fd.get("id") || "");
+  const existing = id ? await db.product.findFirst({ where: { id, sellerId: seller.id }, include: { variants: true, options: true, images: true } }) : null;
+  if (id && !existing) return { error: "Product not found" };
+  const ownVariants = existing?.variants.filter((v) => v.sellerId === seller.id) ?? [];
+  const others = existing ? existing.variants.some((v) => v.sellerId !== seller.id) : false;
+  const locked = !!existing && existing.approvalStatus === "APPROVED" && others;
+
   let options: OptionIn[], variants: VariantIn[], specs: Record<string, string>, images: string[];
   try {
-    options = (JSON.parse(String(fd.get("options") || "[]")) as OptionIn[])
-      .map((o) => ({ name: String(o.name).trim(), nameAr: String(o.nameAr ?? "").trim(), values: [...new Set((o.values ?? []).map((v) => String(v).trim()).filter(Boolean))] }))
-      .filter((o) => o.name && o.values.length).slice(0, 3);
+    options = locked
+      ? existing!.options.sort((a, b) => a.position - b.position).map((o) => ({ name: o.name, nameAr: o.nameAr, values: JSON.parse(o.values) as string[] })).filter((o) => !(o.name === "Title" && o.values.length === 1 && o.values[0] === "Default Title"))
+      : (JSON.parse(String(fd.get("options") || "[]")) as OptionIn[])
+          .map((o) => ({ name: String(o.name).trim(), nameAr: String(o.nameAr ?? "").trim(), values: [...new Set((o.values ?? []).map((v) => String(v).trim()).filter(Boolean))] }))
+          .filter((o) => o.name && o.values.length).slice(0, 3);
     variants = JSON.parse(String(fd.get("variants") || "[]"));
     specs = JSON.parse(String(fd.get("specs") || "{}"));
     images = (JSON.parse(String(fd.get("images") || "[]")) as string[]).filter((u) => typeof u === "string" && (u.startsWith("/") || u.startsWith("https://")));
   } catch {
     return { error: "Invalid form data" };
   }
-  for (const f of fd.getAll("newImages")) {
-    if (f instanceof File && f.size) {
-      try { images.push((await saveUpload(f, d.name)).url); } catch (e) { return { error: e instanceof Error ? e.message : "Upload failed" }; }
+  if (!locked)
+    for (const f of fd.getAll("newImages")) {
+      if (f instanceof File && f.size) {
+        try { images.push((await saveUpload(f, d.name)).url); } catch (e) { return { error: e instanceof Error ? e.message : "Upload failed" }; }
+      }
     }
-  }
-  if (!images.length) return { error: "Add at least one product image" };
+  if (!locked && !images.length) return { error: "Add at least one product image" };
   if (!variants.length) return { error: "Add at least one variant with a price" };
   for (const v of variants) {
     if (!(Number(v.price) > 0)) return { error: "Every variant needs a price greater than 0" };
@@ -61,74 +78,97 @@ export async function saveSellerProduct(_: FormState, fd: FormData): Promise<For
   }
   const skus = variants.map((v) => v.sku?.trim()).filter(Boolean);
   if (new Set(skus).size !== skus.length) return { error: "SKUs must be unique" };
-
-  const id = String(fd.get("id") || "");
-  const existing = id ? await db.product.findFirst({ where: { id, sellerId: seller.id }, include: { variants: true, options: true, images: true } }) : null;
-  if (id && !existing) return { error: "Product not found" };
   if (skus.length) {
-    const clash = await db.variant.findFirst({ where: { sku: { in: skus as string[] }, ...(existing ? { productId: { not: existing.id } } : {}) } });
-    if (clash) return { error: `SKU ${clash.sku} is already used by another product` };
+    const own = new Set(ownVariants.map((v) => v.id));
+    const clash = await db.variant.findFirst({ where: { sku: { in: skus as string[] }, id: { notIn: [...own] } } });
+    if (clash) return { error: `SKU ${clash.sku} is already used by another offer` };
   }
 
-  // content changes on an approved product send it back for review; price/stock-only edits don't
+  // condition / evidence / terms apply to every variant in this form (use "Edit offer" for per-variant differences)
+  const tr = parseOfferTerms(fd, settings.returnsDays);
+  if (!tr.ok) return { error: tr.error };
+  const t = tr.terms;
+  const ph = await collectPhotos(fd, `${seller.shopName}: ${d.name}`);
+  if (ph.error) return { error: ph.error };
+  const photos = ph.photos!;
+  const auto = settings.marketplace.autoApproveProducts;
+
+  // content changes on an approved product send it back for review; price/stock/terms-only edits don't touch the product
   const contentKey = (p: { name: string; nameAr: string; description: string; descriptionAr: string; categoryId: string; brand: string; productType: string; specs: string }, imgs: string[], opts: OptionIn[]) =>
     JSON.stringify([p.name, p.nameAr, p.description, p.descriptionAr, p.categoryId, p.brand, p.productType, p.specs, imgs, opts.map((o) => [o.name, o.values])]);
   const specsJson = JSON.stringify(specs);
   const newKey = contentKey({ ...d, specs: specsJson }, images, options);
   const oldKey = existing ? contentKey(existing, existing.images.sort((a, b) => a.position - b.position).map((i) => i.url), existing.options.sort((a, b) => a.position - b.position).map((o) => ({ name: o.name, nameAr: o.nameAr, values: JSON.parse(o.values) }))) : "";
-  const needsReview = !existing || newKey !== oldKey || existing.approvalStatus !== "APPROVED";
-  const approvalStatus = !needsReview ? "APPROVED" : settings.marketplace.autoApproveProducts ? "APPROVED" : fd.get("draft") === "1" ? "DRAFT" : "PENDING";
+  const needsReview = !locked && (!existing || newKey !== oldKey || existing.approvalStatus !== "APPROVED");
+  const productStatus = !needsReview ? "APPROVED" : auto ? "APPROVED" : fd.get("draft") === "1" ? "DRAFT" : "PENDING";
 
   const base = {
     name: d.name, nameAr: d.nameAr, description: d.description, descriptionAr: d.descriptionAr, categoryId: d.categoryId, brand: d.brand,
-    productType: d.productType, priceNew: d.priceNew, tags: d.tags, specs: specsJson, image: images[0], approvalStatus,
+    productType: d.productType, priceNew: d.priceNew, tags: d.tags, specs: specsJson, image: images[0], approvalStatus: productStatus,
     rejectionReason: needsReview ? null : existing?.rejectionReason ?? null, status: "ACTIVE",
   };
-  const product = existing
-    ? await db.product.update({ where: { id: existing.id }, data: base })
-    : await db.product.create({ data: { ...base, sellerId: seller.id, slug: `${slugify(`${d.brand} ${d.name}`)}-${Math.random().toString(36).slice(2, 6)}` } });
+  const product = locked
+    ? existing!
+    : existing
+      ? await db.product.update({ where: { id: existing.id }, data: base })
+      : await db.product.create({ data: { ...base, sellerId: seller.id, slug: `${slugify(`${d.brand} ${d.name}`)}-${Math.random().toString(36).slice(2, 6)}` } });
 
-  await db.productImage.deleteMany({ where: { productId: product.id } });
-  await db.productImage.createMany({ data: images.map((url, i) => ({ productId: product.id, url, alt: d.name, position: i })) });
-  await db.productOption.deleteMany({ where: { productId: product.id } });
-  const opts = options.length ? options : [{ name: "Title", nameAr: "", values: ["Default Title"] }];
-  await db.productOption.createMany({ data: opts.map((o, i) => ({ productId: product.id, name: o.name, nameAr: o.nameAr, position: i, values: JSON.stringify(o.values) })) });
+  if (!locked) {
+    await db.productImage.deleteMany({ where: { productId: product.id } });
+    await db.productImage.createMany({ data: images.map((url, i) => ({ productId: product.id, url, alt: d.name, position: i })) });
+    await db.productOption.deleteMany({ where: { productId: product.id } });
+    const opts = options.length ? options : [{ name: "Title", nameAr: "", values: ["Default Title"] }];
+    await db.productOption.createMany({ data: opts.map((o, i) => ({ productId: product.id, name: o.name, nameAr: o.nameAr, position: i, values: JSON.stringify(o.values) })) });
+  }
 
   const keyOf = (v: { option1: string | null; option2: string | null; option3: string | null }) => [v.option1, v.option2, v.option3].map((x) => x ?? "").join("|");
-  const old = existing?.variants ?? [];
   const keep = new Set<string>();
+  const tdata = termsData(t, photos);
   for (const [i, raw] of variants.entries()) {
     const v = { option1: options.length ? raw.option1 : "Default Title", option2: options.length > 1 ? raw.option2 : null, option3: options.length > 2 ? raw.option3 : null };
     const title = options.length ? [v.option1, v.option2, v.option3].filter(Boolean).join(" / ") : "Default Title";
     const data = { ...v, title, price: Number(raw.price), comparePrice: raw.comparePrice ? Number(raw.comparePrice) : null, sku: raw.sku?.trim() || null, position: i };
-    const match = old.find((o) => keyOf(o) === keyOf(v));
+    const match = ownVariants.find((o) => keyOf(o) === keyOf(v));
     const stock = Number(raw.stock);
     if (match) {
       keep.add(match.id);
-      await db.variant.update({ where: { id: match.id }, data: { ...data, stock } });
+      const changed = termsChanged(match, t, photos);
+      const status = changed && match.approvalStatus !== "DRAFT" ? (auto ? "APPROVED" : "PENDING") : match.approvalStatus;
+      await db.variant.update({ where: { id: match.id }, data: { ...data, ...tdata, stock, approvalStatus: status, verification: changed ? (t.hasEvidence ? "SELLER_DECLARED" : "NONE") : match.verification } });
       if (stock !== match.stock) await db.inventoryAdjustment.create({ data: { variantId: match.id, delta: stock - match.stock, reason: "correction", note: `Seller ${seller.shopName}` } });
     } else {
-      const created = await db.variant.create({ data: { ...data, stock, productId: product.id } });
+      const status = locked ? (auto ? "APPROVED" : "PENDING") : productStatus;
+      const created = await db.variant.create({ data: { ...data, ...tdata, stock, productId: product.id, sellerId: seller.id, approvalStatus: status, verification: t.hasEvidence ? "SELLER_DECLARED" : "NONE" } });
       keep.add(created.id);
       if (stock) await db.inventoryAdjustment.create({ data: { variantId: created.id, delta: stock, reason: "received", note: `Seller ${seller.shopName}` } });
     }
   }
-  await db.variant.deleteMany({ where: { productId: product.id, id: { notIn: [...keep] } } });
+  // only this seller's own offers can be removed here, never other sellers' or the store's
+  await db.variant.deleteMany({ where: { productId: product.id, sellerId: seller.id, id: { notIn: [...keep] } } });
 
-  if (approvalStatus === "PENDING" && settings.notifications.staffEmail)
-    await sendEmail(settings.notifications.staffEmail, `Product awaiting approval: ${d.name}`, `<p>${seller.shopName} submitted <b>${d.name}</b> for review.</p>${btn(`${siteUrl()}/admin/sellers/products`, "Review products")}`, "staff_product_review");
+  const pendingSomething = productStatus === "PENDING" || (!!existing && (await db.variant.count({ where: { productId: product.id, sellerId: seller.id, approvalStatus: "PENDING" } })) > 0);
+  if (pendingSomething && settings.notifications.staffEmail)
+    await sendEmail(settings.notifications.staffEmail, `Marketplace approval needed: ${d.name}`, `<p>${seller.shopName} submitted <b>${d.name}</b> for review.</p>${btn(`${siteUrl()}/admin/sellers/products`, "Review")}`, "staff_product_review");
   revalidatePath("/seller/products");
   revalidatePath("/", "layout");
-  redirect(`/seller/products?saved=${approvalStatus}`);
+  redirect(`/seller/products?saved=${locked ? "OFFER_PENDING" : productStatus}`);
 }
 
+/** Delete a product proposal. Other sellers' and the store's offers are never touched; sold offers are retired instead. */
 export async function deleteSellerProduct(fd: FormData) {
   const { seller } = await requireSeller();
   const id = String(fd.get("id"));
-  const p = await db.product.findFirst({ where: { id, sellerId: seller.id } });
+  const p = await db.product.findFirst({ where: { id, sellerId: seller.id }, include: { variants: true } });
   if (!p) return;
   const sold = await db.orderItem.count({ where: { productId: id } });
-  if (sold) await db.product.update({ where: { id }, data: { status: "ARCHIVED" } });
+  const othersOffer = p.variants.some((v) => v.sellerId !== seller.id);
+  if (othersOffer) {
+    // keep the shared product for the other sellers; remove only this seller's unsold offers (retire sold ones)
+    for (const v of p.variants.filter((x) => x.sellerId === seller.id)) {
+      if (await db.orderItem.count({ where: { variantId: v.id } })) await db.variant.update({ where: { id: v.id }, data: { approvalStatus: "DRAFT", stock: 0 } });
+      else await db.variant.delete({ where: { id: v.id } });
+    }
+  } else if (sold) await db.product.update({ where: { id }, data: { status: "ARCHIVED" } });
   else await db.product.delete({ where: { id } });
   revalidatePath("/seller/products");
   revalidatePath("/", "layout");
@@ -139,7 +179,7 @@ export async function updateSellerStock(fd: FormData) {
   const { seller } = await requireSeller();
   const variantId = String(fd.get("variantId"));
   const stock = Math.max(0, Math.floor(Number(fd.get("stock"))));
-  const v = await db.variant.findFirst({ where: { id: variantId, product: { sellerId: seller.id } } });
+  const v = await db.variant.findFirst({ where: { id: variantId, sellerId: seller.id } });
   if (!v || Number.isNaN(stock)) return;
   await db.variant.update({ where: { id: v.id }, data: { stock } });
   if (stock !== v.stock) await db.inventoryAdjustment.create({ data: { variantId: v.id, delta: stock - v.stock, reason: "correction", note: `Seller ${seller.shopName}` } });
@@ -171,7 +211,11 @@ export async function updateSellerOrder(fd: FormData) {
   if (order && order.items.every((i) => i.sellerId)) {
     const all = order.sellerOrders.filter((x) => x.status !== "CANCELLED");
     if (all.every((x) => x.status === "DELIVERED") && order.fulfillmentStatus !== "DELIVERED")
-      await db.order.update({ where: { id: order.id }, data: { fulfillmentStatus: "DELIVERED", deliveredAt: new Date(), ...(order.paymentMethod === "COD" && order.paymentStatus === "PENDING" ? { paymentStatus: "PAID", paidAt: new Date() } : {}) } });
+    {
+      const codPaid = order.paymentMethod === "COD" && order.paymentStatus === "PENDING";
+      await db.order.update({ where: { id: order.id }, data: { fulfillmentStatus: "DELIVERED", deliveredAt: new Date(), ...(codPaid ? { paymentStatus: "PAID", paidAt: new Date() } : {}) } });
+      if (codPaid) await postOrderPaidSafe(order.id); // double-entry ledger: cash collected on delivery
+    }
     else if (all.every((x) => ["SHIPPED", "DELIVERED"].includes(x.status)) && order.fulfillmentStatus === "UNFULFILLED")
       await db.order.update({ where: { id: order.id }, data: { fulfillmentStatus: "FULFILLED", fulfilledAt: new Date() } });
   }

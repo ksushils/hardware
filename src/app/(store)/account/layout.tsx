@@ -11,7 +11,7 @@ export default async function AccountLayout({ children }: { children: React.Reac
   const user = await requireUser();
   const { t, locale } = await getI18n();
   const seller = await db.seller.findUnique({ where: { userId: user.id }, select: { status: true } });
-  const links: [string, string][] = [[t.account.profile, "/account"], [t.account.orders, "/account/orders"], [t.account.addresses, "/account/addresses"], [t.account.wishlist, "/account/wishlist"], [t.account.returns, "/account/returns"]];
+  const links: [string, string][] = [[t.account.profile, "/account"], [t.account.orders, "/account/orders"], [t.account.addresses, "/account/addresses"], [t.account.wishlist, "/account/wishlist"], [t.account.returns, "/account/returns"], [locale === "ar" ? "طلبات الدعم" : "Support cases", "/account/cases"]];
   return (
     <div className="container-x py-8">
       <h1 className="text-3xl font-black">{fmt(t.account.hi, { name: user.name.split(" ")[0] })}</h1>

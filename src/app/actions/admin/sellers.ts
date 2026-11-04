@@ -1,4 +1,5 @@
 "use server";
+import { postAdjustmentSafe, postPayoutSafe } from "@/lib/ledgerPosting";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
@@ -66,7 +67,8 @@ export async function adjustSellerBalance(fd: FormData) {
   const amount = Math.round(Number(fd.get("amount")) * 100) / 100;
   const note = str(fd, "note");
   if (!amount || !note) back(`/admin/sellers/${id}`, { error: "Enter a non-zero amount and a note." });
-  await db.sellerTransaction.create({ data: { sellerId: id, type: "ADJUSTMENT", amount, note } });
+  const adjTx = await db.sellerTransaction.create({ data: { sellerId: id, type: "ADJUSTMENT", amount, note } });
+  await postAdjustmentSafe(adjTx.id); // double-entry ledger
   await logActivity(user, "adjusted", "seller", `Balance adjustment AED ${amount} (${note})`, id);
   refresh();
   back(`/admin/sellers/${id}`, { msg: "Adjustment recorded." });
@@ -96,6 +98,11 @@ export async function reviewProducts(fd: FormData) {
   const products = await db.product.findMany({ where: { id: { in: ids }, sellerId: { not: null } }, include: { seller: true } });
   for (const p of products) {
     await db.product.update({ where: { id: p.id }, data: { approvalStatus: decision === "APPROVED" ? "APPROVED" : "REJECTED", rejectionReason: decision === "APPROVED" ? null : reason } });
+    // the creator's own offers on this new product follow the product decision (offers of other sellers are never touched)
+    await db.variant.updateMany({
+      where: { productId: p.id, sellerId: p.sellerId, approvalStatus: { in: ["PENDING", "DRAFT"] } },
+      data: decision === "APPROVED" ? { approvalStatus: "APPROVED", rejectionReason: null } : { approvalStatus: "REJECTED", rejectionReason: reason },
+    });
     if (p.seller)
       await sendEmail(p.seller.email, decision === "APPROVED" ? `Product approved: ${p.name}` : `Product needs changes: ${p.name}`,
         decision === "APPROVED" ? `<p><b>${p.name}</b> is now live on the store.</p>${btn(`${siteUrl()}/products/${p.slug}`, "View product")}` : `<p><b>${p.name}</b> was not approved.</p><p><b>Reason:</b> ${reason}</p>${btn(`${siteUrl()}/seller/products/${p.id}`, "Edit product")}`,
@@ -121,6 +128,7 @@ export async function processPayout(fd: FormData) {
       db.payout.update({ where: { id }, data: { status: "PAID", reference, paidAt: new Date(), adminNote: str(fd, "note") || null } }),
       db.sellerTransaction.create({ data: { sellerId: payout.sellerId, type: "PAYOUT", amount: -payout.amount, payoutId: id, note: `Payout ${reference}` } }),
     ]);
+    await postPayoutSafe(id); // double-entry ledger
     await sendEmail(payout.seller.email, `Payout of AED ${payout.amount} sent`, `<p>We've transferred <b>AED ${payout.amount}</b> to your bank account (${payout.seller.iban ?? "on file"}).</p><p>Reference: ${reference}</p>`, "seller_payout_paid");
   } else if (action === "reject" && ["REQUESTED", "APPROVED"].includes(payout.status)) {
     const note = str(fd, "note");

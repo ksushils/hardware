@@ -4,6 +4,11 @@ import { getSettings } from "./settings";
 import { sendEmail, btn } from "./mailer";
 import { orderUrl } from "./orderAccess";
 import { orderEvent } from "./activity";
+import { describeShipments } from "./shipments";
+import { etaText } from "./shipmentMath";
+
+// Seller-supplied text (product and shop names) is untrusted: escape before putting it in HTML.
+const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 type Kind = "confirmation" | "shipped" | "delivered" | "refunded" | "cancelled";
 
@@ -24,7 +29,19 @@ export async function sendOrderEmail(order: Order & { items: OrderItem[] }, kind
   if (kind === "refunded" && !n.refundNotification) return;
   const ar = order.locale === "ar";
   const subject = subjects[kind][ar ? 1 : 0].replace("{n}", order.number);
-  const rows = order.items.map((i) => `<tr><td style="padding:6px 0">${i.name}${i.variantTitle ? ` <span style="color:#64748b">(${i.variantTitle})</span>` : ""} × ${i.quantity}</td><td style="text-align:right">AED ${((i.price + i.warrantyPrice) * i.quantity).toFixed(2)}</td></tr>`).join("");
+  // One block per shipment: "Shipment 1 of 2 · Sold by X · arrives in 3–5 business days" (never a single date for separate parcels)
+  const shipments = await describeShipments(order);
+  const itemRow = (i: OrderItem) => `<tr><td style="padding:6px 0">${esc(i.name)}${i.variantTitle ? ` <span style="color:#64748b">(${esc(i.variantTitle)})</span>` : ""} × ${i.quantity}</td><td style="text-align:right">AED ${((i.price + i.warrantyPrice) * i.quantity).toFixed(2)}</td></tr>`;
+  const rows = shipments.map((sh) => {
+    const showHead = shipments.length > 1 || sh.kind === "SELLER";
+    const sold = esc(sh.sellerName ?? s.storeName);
+    const eta = sh.etaMin != null && !["DELIVERED", "CANCELLED"].includes(sh.status) ? `${ar ? "يصل خلال" : "arrives in"} ${etaText(sh.etaMin, sh.etaMax, ar ? "ar" : "en")} · ` : "";
+    const trk = sh.kind === "SELLER" && sh.trackingNumber ? ` · ${esc(sh.trackingCompany ?? "")} ${esc(sh.trackingNumber)}` : "";
+    const head = showHead
+      ? `<tr><td colspan="2" style="padding:14px 0 4px;font-weight:700">${ar ? `شحنة ${sh.index} من ${sh.total}` : `Shipment ${sh.index} of ${sh.total}`} · ${ar ? "يُباع بواسطة" : "Sold by"} ${sold}<br><span style="font-weight:400;color:#64748b;font-size:12px">${eta}${ar ? "التوصيل" : "delivery"} ${sh.fee > 0 ? `AED ${sh.fee.toFixed(2)}` : ar ? "مجاني" : "free"}${trk}</span></td></tr>`
+      : "";
+    return head + sh.items.map(itemRow).join("");
+  }).join("");
   const tracking = order.trackingNumber ? `<p><b>${ar ? "رقم التتبع" : "Tracking"}:</b> ${order.trackingCompany ?? ""} ${order.trackingNumber} ${order.trackingUrl ? `<a href="${order.trackingUrl}">${ar ? "تتبع" : "Track"}</a>` : ""}</p>` : "";
   const intro: Record<Kind, string> = {
     confirmation: ar ? `شكرًا لطلبك يا ${order.fullName}! سنخبرك عند شحنه.` : `Thanks for your order, ${order.fullName}! We'll let you know when it ships.`,

@@ -17,17 +17,20 @@ export function lineTotal(l: PricedLine, cfg: PricingConfig = DEFAULT_PRICING) {
  * discount: amount already evaluated server-side (see lib/discounts.ts)
  * freeShipping: from a FREE_SHIPPING discount
  * giftCardBalance: available gift card balance, applied last
+ * shipmentFees: per-shipment delivery fees (see lib/shipmentMath.ts). When given they replace `rate`; the sum is the order's shipping.
  */
 export function computeTotals(
   lines: PricedLine[],
-  opts: { rate?: RateLike; paymentMethod?: string; discount?: number; freeShipping?: boolean; giftCardBalance?: number; cfg?: PricingConfig } = {},
+  opts: { rate?: RateLike; paymentMethod?: string; discount?: number; freeShipping?: boolean; giftCardBalance?: number; cfg?: PricingConfig; shipmentFees?: number[] } = {},
 ) {
   const cfg = opts.cfg ?? DEFAULT_PRICING;
   const subtotal = round(lines.reduce((s, l) => s + lineTotal(l, cfg), 0));
   const discount = round(Math.min(opts.discount ?? 0, subtotal));
   const afterDiscount = subtotal - discount;
   let shipping = 0;
-  if (opts.rate && !opts.freeShipping) {
+  if (opts.shipmentFees) {
+    shipping = opts.freeShipping ? 0 : round(opts.shipmentFees.reduce((a, b) => a + b, 0));
+  } else if (opts.rate && !opts.freeShipping) {
     shipping = opts.rate.freeAbove != null && afterDiscount >= opts.rate.freeAbove ? 0 : opts.rate.price;
   }
   const codFee = opts.paymentMethod === "COD" ? cfg.codFee : 0;

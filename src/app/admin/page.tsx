@@ -28,16 +28,18 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
       can("products") ? db.review.count({ where: { status: "PENDING" } }) : 0,
       can("products") ? db.variant.count({ where: { trackInventory: true, stock: { lte: 2 }, product: { status: "ACTIVE" } } }) : 0,
       can("orders") ? db.checkout.count({ where: { recoveredOrder: null, email: { not: null }, updatedAt: { gte: dayAgo } } }) : 0,
+      can("orders") ? db.supportCase.count({ where: { status: { in: ["OPEN", "IN_REVIEW", "ESCALATED"] } } }) : 0,
     ]),
     can("orders") ? db.order.findMany({ where: { status: { not: "DRAFT" } }, orderBy: { createdAt: "desc" }, take: 6 }) : [],
     db.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
     can("products") ? db.variant.findMany({ where: { trackInventory: true, stock: { lte: 2 }, product: { status: "ACTIVE" } }, include: { product: { select: { id: true, name: true } } }, orderBy: { stock: "asc" }, take: 6 }) : [],
   ]);
-  const [toFulfil, unpaid, returns, reviews, low, abandoned] = todo;
+  const [toFulfil, unpaid, returns, reviews, low, abandoned, supportCases] = todo;
   const todos = [
     { n: toFulfil, label: "orders to fulfil", href: "/admin/orders?tab=unfulfilled", perm: "orders" },
     { n: unpaid, label: "unpaid card orders", href: "/admin/orders?tab=unpaid", perm: "orders" },
     { n: returns, label: "return requests", href: "/admin/returns", perm: "orders" },
+    { n: supportCases, label: "support cases need attention", href: "/admin/cases", perm: "orders" },
     { n: abandoned, label: "abandoned checkouts in the last 24h", href: "/admin/abandoned", perm: "orders" },
     { n: reviews, label: "reviews awaiting moderation", href: "/admin/reviews?status=PENDING", perm: "products" },
     { n: low, label: "variants low on stock", href: "/admin/inventory?filter=low", perm: "products" },

@@ -3,12 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
-import { productInclude, visibleWhere } from "@/lib/catalog";
+import { listedProducts, productInclude, visibleWhere } from "@/lib/catalog";
+import { effectiveCondition, offerAvailable, offerListed, parsePhotos, schemaItemCondition } from "@/lib/offers";
 import { getI18n, fmt } from "@/lib/i18n";
 import { getSettings, pricingConfig } from "@/lib/settings";
 import { loc, parseSpecs, parseValues } from "@/lib/format";
 import { renderMarkdown } from "@/lib/markdown";
-import { isAvailable } from "@/lib/inventory";
 import { siteUrl } from "@/lib/site";
 import { toggleWishlist } from "@/app/actions/account";
 import BuyBox from "@/components/BuyBox";
@@ -27,7 +27,7 @@ async function load(slug: string) {
   return db.product.findFirst({
     where: { slug, ...visibleWhere },
     include: {
-      variants: { orderBy: { position: "asc" } }, options: { orderBy: { position: "asc" } }, images: { orderBy: { position: "asc" } }, category: true,
+      variants: { orderBy: { position: "asc" }, include: { seller: true } }, options: { orderBy: { position: "asc" } }, images: { orderBy: { position: "asc" } }, category: true,
       seller: true, reviews: { where: { status: "PUBLISHED" }, include: { user: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
     },
   });
@@ -51,11 +51,14 @@ export default async function ProductPage({ params }: Props) {
   const { slug } = await params;
   const product = await load(slug);
   if (!product) notFound();
+  // only offers that may be shown (approved, seller approved & not on vacation); sold-out ones stay visible as "sold out"
+  const offers = product.variants.filter(offerListed);
+  if (!offers.length) notFound();
   const [{ t, locale }, user, s] = await Promise.all([getI18n(), getUser(), getSettings()]);
   const wished = user ? !!(await db.wishlistItem.findUnique({ where: { userId_productId: { userId: user.id, productId: product.id } } })) : false;
   const weekAgo = new Date(Date.now() - 7 * 86400_000);
   const [related, soldThisWeek, questions] = await Promise.all([
-    db.product.findMany({ where: { ...visibleWhere, categoryId: product.categoryId, id: { not: product.id } }, include: productInclude, take: 4 }),
+    db.product.findMany({ where: { ...visibleWhere, categoryId: product.categoryId, id: { not: product.id } }, include: productInclude, take: 8 }).then((r) => listedProducts(r).slice(0, 4)),
     db.orderItem.aggregate({ where: { productId: product.id, order: { createdAt: { gte: weekAgo }, status: { notIn: ["CANCELLED", "DRAFT"] } } }, _sum: { quantity: true } }),
     db.productQuestion.findMany({ where: { productId: product.id, published: true }, orderBy: { createdAt: "desc" } }),
   ]);
@@ -64,7 +67,11 @@ export default async function ProductPage({ params }: Props) {
   const avg = product.reviews.length ? product.reviews.reduce((a, r) => a + r.rating, 0) / product.reviews.length : 0;
   const options = product.options.map((o) => ({ name: o.name, nameAr: o.nameAr, values: parseValues(o.values) }));
   const images = product.images.length ? product.images.map((i) => ({ url: i.url, alt: i.alt || name })) : [{ url: product.image || "/img/gpu.svg", alt: name }];
-  const minPrice = Math.min(...product.variants.map((v) => v.price));
+  const minPrice = Math.min(...offers.map((v) => v.price));
+  const ci = product.options.findIndex((o) => o.name.toLowerCase() === "condition");
+  const condOf = (v: (typeof offers)[number]) => (ci >= 0 ? v[(["option1", "option2", "option3"] as const)[ci]] : null);
+  const sellerIds = [...new Set(offers.map((v) => v.sellerId ?? "store"))];
+  const onlySeller = sellerIds.length === 1 ? offers[0].seller : undefined;
   const sold = soldThisWeek._sum.quantity ?? 0;
   const catName = loc(locale, product.category.name, product.category.nameAr);
 
@@ -73,12 +80,14 @@ export default async function ProductPage({ params }: Props) {
       <JsonLd data={{
         "@context": "https://schema.org", "@type": "Product", name: `${product.brand} ${product.name}`, description: product.description.replace(/[#*_]/g, ""),
         image: images.map((i) => (i.url.startsWith("http") ? i.url : siteUrl() + i.url)), brand: { "@type": "Brand", name: product.brand }, category: product.category.name,
-        sku: product.variants[0]?.sku ?? undefined,
-        offers: product.variants.map((v) => ({
+        sku: offers[0]?.sku ?? undefined,
+        offers: offers.map((v) => ({
           "@type": "Offer", url: `${siteUrl()}/products/${product.slug}`, priceCurrency: "AED", price: v.price, sku: v.sku ?? undefined, name: v.title,
-          availability: isAvailable(v) ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-          itemCondition: v.option1 === "Brand New" || !product.options.some((o) => o.name === "Condition") ? "https://schema.org/NewCondition" : "https://schema.org/RefurbishedCondition",
-          seller: { "@type": "Organization", name: product.seller?.shopName ?? s.storeName },
+          availability: offerAvailable(v) ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+          itemCondition: effectiveCondition(v, condOf(v)).type ? schemaItemCondition(effectiveCondition(v, condOf(v)).type) : "https://schema.org/NewCondition",
+          seller: { "@type": "Organization", name: v.seller?.shopName ?? s.storeName },
+          ...(v.warrantyMonths ? { warranty: { "@type": "WarrantyPromise", durationOfWarranty: { "@type": "QuantitativeValue", value: v.warrantyMonths, unitCode: "MON" } } } : {}),
+          hasMerchantReturnPolicy: { "@type": "MerchantReturnPolicy", applicableCountry: "AE", returnPolicyCategory: "https://schema.org/MerchantReturnFiniteReturnWindow", merchantReturnDays: v.returnDays ?? s.returnsDays },
           shippingDetails: { "@type": "OfferShippingDetails", shippingDestination: { "@type": "DefinedRegion", addressCountry: "AE" } },
         })),
         ...(product.reviews.length ? {
@@ -107,9 +116,13 @@ export default async function ProductPage({ params }: Props) {
                 {sold >= 2 && <span className="rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700">🔥 {locale === "ar" ? `بيع ${sold} هذا الأسبوع` : `${sold} sold this week`}</span>}
               </div>
               <p className="mt-2 text-sm text-slate-600">
-                {locale === "ar" ? "يُباع بواسطة " : "Sold by "}
-                {product.seller ? <Link href={`/sellers/${product.seller.slug}`} className="font-semibold text-brand-700 hover:underline">{product.seller.shopName}</Link> : <b>{loc(locale, s.storeName, s.storeNameAr)}</b>}
-                {product.seller && product.seller.ratingCount > 0 && <span className="text-slate-500"> · ★ {product.seller.ratingAvg.toFixed(1)}</span>}
+                {sellerIds.length > 1
+                  ? <b>{locale === "ar" ? `${sellerIds.length} بائعين يعرضون هذا المنتج` : `${sellerIds.length} sellers offer this product`}</b>
+                  : <>
+                      {locale === "ar" ? "يُباع بواسطة " : "Sold by "}
+                      {onlySeller ? <Link href={`/sellers/${onlySeller.slug}`} className="font-semibold text-brand-700 hover:underline">{onlySeller.shopName}</Link> : <b>{loc(locale, s.storeName, s.storeNameAr)}</b>}
+                      {onlySeller && onlySeller.ratingCount > 0 && <span className="text-slate-500"> · ★ {onlySeller.ratingAvg.toFixed(1)}</span>}
+                    </>}
               </p>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-2">
@@ -122,11 +135,21 @@ export default async function ProductPage({ params }: Props) {
               </form>
             </div>
           </div>
-          {product.seller?.vacationMode && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">🏖️ {product.seller.vacationMessage || (locale === "ar" ? "البائع في إجازة حاليًا." : "This seller is on vacation.")}</p>}
           <div className="card mt-6 p-5">
             <BuyBox
-              variants={product.variants.map(({ id, title, option1, option2, option3, price, comparePrice, stock, trackInventory, continueSelling, sku, image }) => ({ id, title, option1, option2, option3, price, comparePrice, stock, trackInventory, continueSelling, sku, image }))}
+              variants={offers.map((v) => ({
+                id: v.id, title: v.title, option1: v.option1, option2: v.option2, option3: v.option3, price: v.price, comparePrice: v.comparePrice, stock: v.stock,
+                trackInventory: v.trackInventory, continueSelling: v.continueSelling, sku: v.sku, image: v.image, sellerId: v.sellerId,
+                // only public seller fields are sent to the browser
+                seller: v.seller ? { id: v.seller.id, shopName: v.seller.shopName, slug: v.seller.slug, status: v.seller.status, vacationMode: v.seller.vacationMode, ratingAvg: v.seller.ratingAvg, ratingCount: v.seller.ratingCount } : null,
+                conditionType: v.conditionType, cosmeticGrade: v.cosmeticGrade, functionalStatus: v.functionalStatus, batteryHealth: v.batteryHealth, batteryCycles: v.batteryCycles,
+                repairDisclosure: v.repairDisclosure, accessories: v.accessories, verification: v.verification, testedAt: v.testedAt ? v.testedAt.toISOString() : null,
+                testedBy: v.testedBy, testNotes: v.testNotes, photos: parsePhotos(v), warrantyProvider: v.warrantyProvider, warrantyMonths: v.warrantyMonths,
+                warrantyTerms: v.warrantyTerms, returnDays: v.returnDays, returnTerms: v.returnTerms, handlingDays: v.handlingDays,
+              }))}
               options={options} priceNew={product.priceNew} express={product.express} name={name} cfg={pricingConfig(s)} codEnabled={s.checkout.codEnabled} onImage={images[0].url}
+              defaults={{ warrantyMonths: s.warranty.months, returnDays: s.returnsDays, storeName: s.storeName, storeNameAr: s.storeNameAr }}
+              batteryRelevant={product.category.slug === "laptops" || offers.some((v) => v.batteryHealth != null)}
             />
           </div>
           <div className="mt-3"><CompareToggle slug={product.slug} /></div>
@@ -158,7 +181,7 @@ export default async function ProductPage({ params }: Props) {
             {product.reviews.map((r) => (
               <div key={r.id} className="card p-4">
                 <div className="flex items-center justify-between">
-                  <p className="font-semibold">{r.user.name}</p>
+                  <p className="font-semibold">{r.user.name}{r.verified && <span className="ms-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">✓ {locale === "ar" ? "مشتري موثّق" : "Verified purchase"}</span>}</p>
                   <span className="flex text-amber-400" aria-label={`${r.rating}/5`}>{[1, 2, 3, 4, 5].map((i) => <StarIcon key={i} filled={i <= r.rating} />)}</span>
                 </div>
                 <p className="mt-2 text-sm text-slate-700">{r.comment}</p>

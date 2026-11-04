@@ -35,6 +35,7 @@ export default function Filters({ facets, showCategories }: { facets: Facets; sh
   // active chips
   const chips: { label: string; key: string; value?: string }[] = [];
   sp.getAll("brand").forEach((v) => chips.push({ label: v, key: "brand", value: v }));
+  sp.getAll("seller").forEach((v) => chips.push({ label: `${locale === "ar" ? "البائع" : "Seller"}: ${facets.sellers.find((x) => x.slug === v)?.name ?? v}`, key: "seller", value: v }));
   sp.getAll("cat").forEach((v) => chips.push({ label: loc(locale, facets.categories.find((c) => c.slug === v)?.name ?? v, facets.categories.find((c) => c.slug === v)?.nameAr), key: "cat", value: v }));
   facets.options.forEach((o) => sp.getAll(`o_${o.name}`).forEach((v) => chips.push({ label: `${loc(locale, o.name, o.nameAr)}: ${t.values[v] ?? v}`, key: `o_${o.name}`, value: v })));
   if (sp.get("min") || sp.get("max")) chips.push({ label: `${sp.get("min") || 0}–${sp.get("max") || "∞"} AED`, key: "price" });
@@ -87,6 +88,13 @@ export default function Filters({ facets, showCategories }: { facets: Facets; sh
           {facets.brands.length > 6 && <input value={brandQ} onChange={(e) => setBrandQ(e.target.value)} placeholder={`${t.common.search}…`} className="input mb-2 py-2 text-xs" aria-label={t.listing.brand} />}
           <div className="max-h-56 space-y-0.5 overflow-y-auto">
             {brands.map((b) => <Check key={b.value} checked={sp.getAll("brand").includes(b.value)} onChange={() => toggle("brand", b.value)} label={b.value} count={b.count} />)}
+          </div>
+        </Section>
+      )}
+      {facets.sellers.length > 1 && (
+        <Section title={locale === "ar" ? "البائع" : "Seller"}>
+          <div className="max-h-48 space-y-0.5 overflow-y-auto">
+            {facets.sellers.map((x) => <Check key={x.slug} checked={sp.getAll("seller").includes(x.slug)} onChange={() => toggle("seller", x.slug)} label={x.name} count={x.count} />)}
           </div>
         </Section>
       )}

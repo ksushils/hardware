@@ -4,6 +4,8 @@ import type { Order, OrderItem, ReturnRequest } from "@prisma/client";
 import { aed, EMIRATES_AR } from "@/lib/format";
 import { getI18n, fmt } from "@/lib/i18n";
 import { getSettings } from "@/lib/settings";
+import { describeShipments } from "@/lib/shipments";
+import { etaText } from "@/lib/shipmentMath";
 import { cancelOrder, retryPayment } from "@/app/actions/checkout";
 import ReturnForm from "./ReturnForm";
 
@@ -21,6 +23,9 @@ export async function StatusBadge({ status }: { status: string }) {
 
 export default async function OrderView({ order, actions = true, k }: { order: Order & { items: OrderItem[]; returns?: ReturnRequest[] }; actions?: boolean; k?: string }) {
   const [{ t, locale }, s] = await Promise.all([getI18n(), getSettings()]);
+  const ar = locale === "ar";
+  const shipments = await describeShipments(order);
+  const SHIP_STATUS: Record<string, [string, string]> = { PENDING: ["Preparing", "قيد التجهيز"], PROCESSING: ["Preparing", "قيد التجهيز"], SHIPPED: ["Shipped", "تم الشحن"], DELIVERED: ["Delivered", "تم التوصيل"], CANCELLED: ["Cancelled", "ملغاة"], REFUNDED: ["Refunded", "مستردة"] };
   const cancelled = order.status === "CANCELLED";
   const step = order.fulfillmentStatus === "DELIVERED" ? 2 : order.fulfillmentStatus === "FULFILLED" ? 1 : 0;
   const needsPayment = order.paymentMethod === "CARD" && order.paymentStatus !== "PAID" && !cancelled && order.status !== "DRAFT" ? true : order.status === "DRAFT" && order.paymentMethod === "CARD";
@@ -70,17 +75,61 @@ export default async function OrderView({ order, actions = true, k }: { order: O
       </div>
 
       <div className="grid gap-5 md:grid-cols-[1fr_300px]">
-        <div className="card divide-y">
-          {order.items.map((i) => (
-            <div key={i.id} className="flex gap-4 p-4">
-              <div className="relative h-16 w-16 shrink-0 rounded-lg bg-slate-50"><Image src={i.image || "/img/gpu.svg"} alt="" fill className="object-contain p-1" unoptimized /></div>
-              <div className="flex-1 text-sm">
-                <p className="font-semibold">{i.name}</p>
-                <p className="text-slate-500">{i.variantTitle.split(" / ").map((x) => t.values[x] ?? x).join(" / ")}{i.variantTitle ? " · " : ""}{t.order.qty} {i.quantity}{i.warranty ? ` · Care+ (${aed(i.warrantyPrice, locale)})` : ""}</p>
+        <div className="space-y-4">
+          {shipments.map((sh) => {
+            const showHeader = shipments.length > 1 || sh.kind === "SELLER";
+            const done = ["DELIVERED", "CANCELLED", "REFUNDED"].includes(sh.status);
+            return (
+              <div key={`${sh.kind}-${sh.index}`} className="card overflow-hidden">
+                {showHeader && (
+                  <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3 text-sm">
+                    <div>
+                      <p className="font-semibold">
+                        {shipments.length > 1 && <span className="me-2 rounded-full bg-ink-900 px-2 py-0.5 text-xs text-white">{ar ? `شحنة ${sh.index} من ${sh.total}` : `Shipment ${sh.index} of ${sh.total}`}</span>}
+                        {ar ? "يُباع ويُشحن بواسطة " : "Sold & shipped by "}<b>{sh.sellerName ?? (ar ? s.storeNameAr || s.storeName : s.storeName)}</b>
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        {!done && sh.etaMin != null && <>{ar ? "الوصول المتوقع خلال " : "Estimated arrival in "}{etaText(sh.etaMin, sh.etaMax, locale)}{" · "}</>}
+                        {ar ? "التوصيل " : "Delivery "}{sh.fee > 0 ? aed(sh.fee, locale) : t.cart.free}
+                      </p>
+                      {sh.kind === "SELLER" && sh.trackingNumber && <p className="mt-1 text-xs">📦 {sh.trackingCompany} <span dir="ltr">{sh.trackingNumber}</span></p>}
+                    </div>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-200">{(SHIP_STATUS[sh.status] ?? [sh.status, sh.status])[ar ? 1 : 0]}</span>
+                  </div>
+                )}
+                <div className="divide-y">
+                  {sh.items.map((i) => {
+                    const w = safeJson<{ provider?: string; months?: number }>(i.warrantySnapshot);
+                    const r = safeJson<{ days?: number }>(i.returnSnapshot);
+                    return (
+                      <div key={i.id} className="flex gap-4 p-4">
+                        <div className="relative h-16 w-16 shrink-0 rounded-lg bg-slate-50"><Image src={i.image || "/img/gpu.svg"} alt="" fill className="object-contain p-1" unoptimized /></div>
+                        <div className="flex-1 text-sm">
+                          <p className="font-semibold">{i.name}</p>
+                          <p className="text-slate-500">{i.variantTitle.split(" / ").map((x) => t.values[x] ?? x).join(" / ")}{i.variantTitle ? " · " : ""}{t.order.qty} {i.quantity}{i.warranty ? ` · Care+ (${aed(i.warrantyPrice, locale)})` : ""}</p>
+                          {(w?.months != null || r?.days != null) && (
+                            <p className="mt-0.5 text-xs text-slate-500">
+                              {w?.months != null && (ar ? `ضمان ${w.months} شهرًا` : `${w.months}-month warranty`)}{w?.months != null && r?.days != null && " · "}{r?.days != null && (ar ? `إرجاع خلال ${r.days} يومًا` : `${r.days}-day returns`)}
+                              {" "}<span className="text-slate-400">({ar ? "الشروط وقت الشراء" : "terms at time of purchase"})</span>
+                            </p>
+                          )}
+                          {actions && order.status !== "DRAFT" && order.paymentStatus !== "VOIDED" && (
+                            <Link
+                              href={k ? `/cases/new?order=${order.number}&item=${i.id}&k=${k}` : `/account/cases/new?order=${order.number}&item=${i.id}`}
+                              className="mt-1 inline-block text-xs font-semibold text-brand-700 underline"
+                            >
+                              ⚠ {ar ? "الإبلاغ عن مشكلة" : "Report a problem"}
+                            </Link>
+                          )}
+                        </div>
+                        <p className="text-sm font-semibold">{aed((i.price + i.warrantyPrice) * i.quantity, locale)}</p>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <p className="text-sm font-semibold">{aed((i.price + i.warrantyPrice) * i.quantity, locale)}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div className="space-y-5">
           <div className="card space-y-1.5 p-5 text-sm">
@@ -90,7 +139,7 @@ export default async function OrderView({ order, actions = true, k }: { order: O
             {order.giftCardAmount > 0 && <div className="flex justify-between"><span>{t.order.giftCard}</span><span>− {aed(order.giftCardAmount, locale)}</span></div>}
             <div className="flex justify-between border-t pt-2 font-bold"><span>{t.order.total}</span><span>{aed(order.total, locale)}</span></div>
             {order.refundedAmount > 0 && <div className="flex justify-between text-red-600"><span>{t.order.statuses.REFUNDED}</span><span>− {aed(order.refundedAmount, locale)}</span></div>}
-            <p className="text-xs text-slate-500">{fmt(t.order.inclVat, { amount: aed(order.vat, locale) })} · {t.order.methods[order.paymentMethod] ?? order.paymentMethod} · {order.shippingRateName}</p>
+            <p className="text-xs text-slate-500">{fmt(t.order.inclVat, { amount: aed(order.vat, locale) })} · {t.order.methods[order.paymentMethod] ?? order.paymentMethod} · {shipments.length > 1 ? (ar ? `${shipments.length} شحنات` : `${shipments.length} shipments`) : order.shippingRateName}</p>
           </div>
           <div className="card p-5 text-sm">
             <p className="font-semibold">{t.order.address}</p>
@@ -101,4 +150,13 @@ export default async function OrderView({ order, actions = true, k }: { order: O
       {actions && canReturn && <ReturnForm number={order.number} k={k} items={order.items.map((i) => ({ id: i.id, name: i.name, quantity: i.quantity }))} />}
     </div>
   );
+}
+
+function safeJson<T>(v: string | null | undefined): T | null {
+  if (!v) return null;
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return null;
+  }
 }
