@@ -6,6 +6,9 @@ import { createSession, destroySession, hashPassword, verifyPassword } from "@/l
 import { getI18n } from "@/lib/i18n";
 import { isStaff } from "@/lib/permissions";
 import { consumeResetToken, sendPasswordReset } from "@/lib/passwordReset";
+import { limitByIp } from "@/lib/rateLimit";
+
+const tooMany = (ar: boolean) => (ar ? "محاولات كثيرة. يرجى الانتظار قليلًا ثم المحاولة مرة أخرى." : "Too many attempts. Please wait a few minutes and try again.");
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
@@ -16,6 +19,7 @@ function safeNext(n: FormDataEntryValue | null, fallback = "/account") {
 
 export async function register(_: FormState, formData: FormData): Promise<FormState> {
   const { t, locale } = await getI18n();
+  if (!(await limitByIp("register", 8, 3600))) return { error: tooMany(locale === "ar") };
   const e = t.auth.errors;
   const schema = z.object({
     name: z.string().trim().min(2, e.name),
@@ -36,8 +40,10 @@ export async function register(_: FormState, formData: FormData): Promise<FormSt
 }
 
 export async function login(_: FormState, formData: FormData): Promise<FormState> {
-  const { t } = await getI18n();
+  const { t, locale } = await getI18n();
   const email = String(formData.get("email") || "").trim().toLowerCase();
+  // brute-force protection: per IP and per account
+  if (!(await limitByIp("login", 10, 900, email))) return { error: tooMany(locale === "ar") };
   const password = String(formData.get("password") || "");
   const user = await db.user.findUnique({ where: { email } });
   if (!user || user.disabled || !(await verifyPassword(password, user.password))) return { error: t.auth.errors.invalid };
@@ -51,14 +57,16 @@ export async function logout() {
 }
 
 export async function forgotPassword(_: FormState, formData: FormData): Promise<FormState> {
-  const { t } = await getI18n();
+  const { t, locale } = await getI18n();
   const email = String(formData.get("email") || "");
+  if (!(await limitByIp("forgot", 5, 3600, email))) return { error: tooMany(locale === "ar") };
   if (email.includes("@")) await sendPasswordReset(email);
   return { ok: t.auth.linkSent };
 }
 
 export async function resetPassword(_: FormState, formData: FormData): Promise<FormState> {
-  const { t } = await getI18n();
+  const { t, locale } = await getI18n();
+  if (!(await limitByIp("reset", 10, 3600))) return { error: tooMany(locale === "ar") };
   const token = String(formData.get("token") || "");
   const password = String(formData.get("password") || "");
   if (password.length < 8) return { error: t.auth.errors.password };

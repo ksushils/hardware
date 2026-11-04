@@ -28,8 +28,8 @@ export const DEFAULT_SETTINGS = {
     titleAr: "قطع كمبيوتر احترافية.",
     highlight: "Up to 60% off new.",
     highlightAr: "وفّر حتى 60% مقارنة بالجديد.",
-    subtitle: "GPUs, CPUs, SSDs, monitors and gaming PCs. Every part passes a 40-point inspection and comes with a 12-month warranty.",
-    subtitleAr: "كروت شاشة، معالجات، أقراص SSD، شاشات وأجهزة ألعاب — كل قطعة تجتاز فحصًا من 40 نقطة مع ضمان 12 شهرًا.",
+    subtitle: "GPUs, CPUs, SSDs, monitors and gaming PCs. Every offer shows its condition, what was tested, and its warranty and return terms.",
+    subtitleAr: "كروت شاشة، معالجات، أقراص SSD، شاشات وأجهزة ألعاب — كل عرض يوضح حالته وما تم اختباره وشروط الضمان والإرجاع.",
     videoUrl: "/video/hero.mp4",
     posterUrl: "/video/hero-poster.jpg",
     overlayOpacity: 60,
@@ -71,6 +71,10 @@ export const DEFAULT_SETTINGS = {
     staffEmail: "orders@techrevive.ae",
   },
   languages: { arabicEnabled: true, defaultLocale: "en" as "en" | "ar" },
+  // Seller-shipped parcels: ETA = offer handling days + this courier window (business days)
+  delivery: { carrierMinDays: 1, carrierMaxDays: 3 },
+  // "Order within Xh for next-day delivery" countdown on Express products. Turn off (or change the cutoff) if your courier arrangement differs.
+  express: { showCountdown: true, cutoffHour: 15, noDeliveryWeekdays: [6] as number[] /* 0 = Sunday … 6 = Saturday */ },
   marketplace: {
     enabled: true,
     defaultCommissionPercent: 10, // used when no CommissionRule / seller override matches

@@ -1,12 +1,13 @@
-import { getI18n } from "@/lib/i18n";
+import { getI18n, fmt } from "@/lib/i18n";
+import { getSettings } from "@/lib/settings";
 import { CardIcon, ReturnIcon, ShieldIcon, TruckIcon } from "./Icons";
 
 export default async function TrustBar() {
-  const { t } = await getI18n();
+  const [{ t }, s] = await Promise.all([getI18n(), getSettings()]);
   const items = [
-    { icon: ShieldIcon, title: t.trust.warranty, sub: t.trust.warrantySub },
+    { icon: ShieldIcon, title: fmt(t.trust.warranty, { months: s.warranty.months }), sub: t.trust.warrantySub },
     { icon: TruckIcon, title: t.trust.delivery, sub: t.trust.deliverySub },
-    { icon: ReturnIcon, title: t.trust.returns, sub: t.trust.returnsSub },
+    { icon: ReturnIcon, title: fmt(t.trust.returns, { days: s.returnsDays }), sub: t.trust.returnsSub },
     { icon: CardIcon, title: t.trust.bnpl, sub: t.trust.bnplSub },
   ];
   return (

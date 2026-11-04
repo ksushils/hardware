@@ -31,6 +31,7 @@ model User {
   resets           PasswordReset[]
   returns          ReturnRequest[]
   seller           Seller?
+  cases            SupportCase[]
 }
 
 model PasswordReset {
@@ -79,37 +80,37 @@ model Category {
 }
 
 model Product {
-  id             String              @id @default(cuid())
-  slug           String              @unique
-  name           String
-  nameAr         String              @default("")
-  brand          String // vendor
-  productType    String              @default("")
-  description    String              @default("") // simple markdown
-  descriptionAr  String              @default("")
-  specs          String              @default("{}") // JSON object of key/value specs
-  image          String              @default("") // primary image (mirror of first ProductImage)
-  status         String              @default("ACTIVE") // ACTIVE | DRAFT | ARCHIVED
-  categoryId     String
-  category       Category            @relation(fields: [categoryId], references: [id])
-  priceNew       Float               @default(0) // reference price of a brand-new unit (AED), shown as "x% vs new"
-  tags           String              @default("") // CSV
-  seoTitle       String?
-  seoDescription String?
-  featured       Boolean             @default(false)
-  express        Boolean             @default(false) // next-day delivery eligible
-  sellerId       String? // null = sold by the store itself
-  seller         Seller?             @relation(fields: [sellerId], references: [id])
-  approvalStatus String              @default("APPROVED") // marketplace: DRAFT | PENDING | APPROVED | REJECTED
+  id              String              @id @default(cuid())
+  slug            String              @unique
+  name            String
+  nameAr          String              @default("")
+  brand           String // vendor
+  productType     String              @default("")
+  description     String              @default("") // simple markdown
+  descriptionAr   String              @default("")
+  specs           String              @default("{}") // JSON object of key/value specs
+  image           String              @default("") // primary image (mirror of first ProductImage)
+  status          String              @default("ACTIVE") // ACTIVE | DRAFT | ARCHIVED
+  categoryId      String
+  category        Category            @relation(fields: [categoryId], references: [id])
+  priceNew        Float               @default(0) // reference price of a brand-new unit (AED), shown as "x% vs new"
+  tags            String              @default("") // CSV
+  seoTitle        String?
+  seoDescription  String?
+  featured        Boolean             @default(false)
+  express         Boolean             @default(false) // next-day delivery eligible
+  sellerId        String? // null = sold by the store itself
+  seller          Seller?             @relation(fields: [sellerId], references: [id])
+  approvalStatus  String              @default("APPROVED") // marketplace: DRAFT | PENDING | APPROVED | REJECTED
   rejectionReason String?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  options        ProductOption[]
-  variants       Variant[]
-  images         ProductImage[]
-  reviews        Review[]
-  wishlist       WishlistItem[]
-  collections    CollectionProduct[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  options         ProductOption[]
+  variants        Variant[]
+  images          ProductImage[]
+  reviews         Review[]
+  wishlist        WishlistItem[]
+  collections     CollectionProduct[]
 }
 
 model ProductOption {
@@ -132,27 +133,50 @@ model ProductImage {
 }
 
 model Variant {
-  id              String                @id @default(cuid())
-  productId       String
-  product         Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
-  title           String // "Excellent / 2TB" or "Default Title"
-  option1         String?
-  option2         String?
-  option3         String?
-  price           Float
-  comparePrice    Float?
-  cost            Float? // cost per item, for profit reports
-  sku             String?               @unique
-  barcode         String?
-  stock           Int                   @default(0)
-  trackInventory  Boolean               @default(true)
-  continueSelling Boolean               @default(false) // sell when out of stock
-  weight          Float? // kg
-  image           String?
-  position        Int                   @default(0)
-  orderItems      OrderItem[]
-  adjustments     InventoryAdjustment[]
-  stockAlerts     StockAlert[]
+  id               String                @id @default(cuid())
+  productId        String
+  product          Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  title            String // "Excellent / 2TB" or "Default Title"
+  option1          String?
+  option2          String?
+  option3          String?
+  price            Float
+  comparePrice     Float?
+  cost             Float? // cost per item, for profit reports
+  sku              String?               @unique
+  barcode          String?
+  stock            Int                   @default(0)
+  trackInventory   Boolean               @default(true)
+  continueSelling  Boolean               @default(false) // sell when out of stock
+  weight           Float? // kg
+  image            String?
+  position         Int                   @default(0)
+  // ── Marketplace offer fields (a Variant is the sellable offer; several sellers can offer the same canonical Product) ──
+  sellerId         String? // null = sold by the store itself
+  seller           Seller?               @relation(fields: [sellerId], references: [id])
+  approvalStatus   String                @default("APPROVED") // offer moderation: DRAFT | PENDING | APPROVED | REJECTED
+  rejectionReason  String?
+  conditionType    String? // NEW | OPEN_BOX | REFURBISHED | USED | PARTS
+  cosmeticGrade    String? // free text, e.g. Excellent / Very Good / Good
+  functionalStatus String? // e.g. "Fully functional", "Minor defect disclosed"
+  batteryHealth    Int? // % (laptops, phones, UPS)
+  batteryCycles    Int?
+  repairDisclosure String? // repairs and replaced parts
+  accessories      String? // included accessories
+  verification     String                @default("NONE") // NONE | SELLER_DECLARED | PLATFORM_VERIFIED (only staff may set the last)
+  testedAt         DateTime?
+  testedBy         String?
+  testNotes        String?
+  photos           String                @default("[]") // JSON array of URLs: photos of the actual unit
+  warrantyProvider String? // SELLER | MANUFACTURER | KARAT | NONE
+  warrantyMonths   Int?
+  warrantyTerms    String?
+  returnDays       Int?
+  returnTerms      String?
+  handlingDays     Int                   @default(1)
+  orderItems       OrderItem[]
+  adjustments      InventoryAdjustment[]
+  stockAlerts      StockAlert[]
 }
 
 model InventoryAdjustment {
@@ -178,23 +202,23 @@ model StockAlert {
 }
 
 model Collection {
-  id            String              @id @default(cuid())
-  handle        String              @unique
-  title         String
-  titleAr       String              @default("")
-  description   String              @default("")
-  descriptionAr String              @default("")
-  image         String?
-  type          String              @default("MANUAL") // MANUAL | SMART
-  rules         String              @default("[]") // JSON [{field, op, value}] for SMART
-  disjunctive   Boolean             @default(false) // SMART: match any rule (true) or all rules (false)
-  sortOrder     String              @default("MANUAL") // MANUAL | BEST | PRICE_ASC | PRICE_DESC | NEWEST | TITLE
-  published     Boolean             @default(true)
-  showOnHome    Boolean             @default(false)
-  seoTitle      String?
+  id             String              @id @default(cuid())
+  handle         String              @unique
+  title          String
+  titleAr        String              @default("")
+  description    String              @default("")
+  descriptionAr  String              @default("")
+  image          String?
+  type           String              @default("MANUAL") // MANUAL | SMART
+  rules          String              @default("[]") // JSON [{field, op, value}] for SMART
+  disjunctive    Boolean             @default(false) // SMART: match any rule (true) or all rules (false)
+  sortOrder      String              @default("MANUAL") // MANUAL | BEST | PRICE_ASC | PRICE_DESC | NEWEST | TITLE
+  published      Boolean             @default(true)
+  showOnHome     Boolean             @default(false)
+  seoTitle       String?
   seoDescription String?
-  createdAt     DateTime            @default(now())
-  products      CollectionProduct[]
+  createdAt      DateTime            @default(now())
+  products       CollectionProduct[]
 }
 
 model CollectionProduct {
@@ -227,6 +251,7 @@ model Review {
   comment   String
   status    String   @default("PUBLISHED") // PUBLISHED | PENDING | HIDDEN
   reply     String? // store reply
+  verified  Boolean  @default(false) // reviewer bought this product
   createdAt DateTime @default(now())
 
   @@unique([productId, userId])
@@ -270,17 +295,17 @@ model GiftCard {
 
 // Checkouts are recorded when a shopper reaches checkout; unconverted ones are "abandoned".
 model Checkout {
-  id              String    @id @default(cuid())
-  token           String    @unique
-  email           String?
-  userId          String?
-  items           String // JSON [{v, q, w}]
-  subtotal        Float     @default(0)
-  locale          String    @default("en")
-  recoveredOrder  String? // order number when converted
-  reminderSentAt  DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  token          String    @unique
+  email          String?
+  userId         String?
+  items          String // JSON [{v, q, w}]
+  subtotal       Float     @default(0)
+  locale         String    @default("en")
+  recoveredOrder String? // order number when converted
+  reminderSentAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 // ───────────────────────── Orders ─────────────────────────
@@ -335,32 +360,38 @@ model Order {
   refunds           Refund[]
   returns           ReturnRequest[]
   sellerOrders      SellerOrder[]
+  cases             SupportCase[]
 }
 
 model OrderItem {
-  id           String  @id @default(cuid())
-  orderId      String
-  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  variantId    String?
-  variant      Variant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
-  productId    String?
-  name         String
-  variantTitle String  @default("")
-  sku          String?
-  image        String
-  price        Float
-  cost         Float?
-  quantity     Int
-  warranty     Boolean @default(false)
-  warrantyPrice Float  @default(0) // per unit
+  id                String       @id @default(cuid())
+  orderId           String
+  order             Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId         String?
+  variant           Variant?     @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  productId         String?
+  name              String
+  variantTitle      String       @default("")
+  sku               String?
+  image             String
+  price             Float
+  cost              Float?
+  quantity          Int
+  warranty          Boolean      @default(false)
+  warrantyPrice     Float        @default(0) // per unit
   // marketplace snapshot at purchase time
-  sellerId         String?
-  sellerOrderId    String?
-  sellerOrder      SellerOrder? @relation(fields: [sellerOrderId], references: [id])
-  commissionRate   Float   @default(0)
-  commissionFixed  Float   @default(0)
-  commissionAmount Float   @default(0)
-  sellerEarning    Float   @default(0)
+  sellerId          String?
+  sellerOrderId     String?
+  sellerOrder       SellerOrder? @relation(fields: [sellerOrderId], references: [id])
+  commissionRate    Float        @default(0)
+  commissionFixed   Float        @default(0)
+  commissionAmount  Float        @default(0)
+  sellerEarning     Float        @default(0)
+  // snapshot of the terms the buyer agreed to at checkout (later seller edits never change these)
+  sellerName        String?
+  conditionSnapshot String? // JSON: conditionType, grade, battery, verification, repairs, accessories
+  warrantySnapshot  String? // JSON: provider, months, terms
+  returnSnapshot    String? // JSON: days, terms
 }
 
 model OrderEvent {
@@ -556,6 +587,8 @@ model Seller {
   payouts            Payout[]
   reviews            SellerReview[]
   messages           SellerMessage[]
+  offers             Variant[]
+  cases              SupportCase[]
 }
 
 // Priority: PRODUCT > SELLER > CATEGORY > GLOBAL (first active match wins). Seller.commission* overrides if set.
@@ -573,21 +606,24 @@ model CommissionRule {
 
 // Per-seller sub-order of a customer order
 model SellerOrder {
-  id               String      @id @default(cuid())
-  orderId          String
-  order            Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  sellerId         String
-  seller           Seller      @relation(fields: [sellerId], references: [id])
-  status           String      @default("PENDING") // PENDING | PROCESSING | SHIPPED | DELIVERED | CANCELLED | REFUNDED
-  subtotal         Float
-  commissionTotal  Float
-  sellerEarning    Float
-  trackingCompany  String?
-  trackingNumber   String?
-  shippedAt        DateTime?
-  deliveredAt      DateTime?
-  createdAt        DateTime    @default(now())
-  items            OrderItem[]
+  id              String      @id @default(cuid())
+  orderId         String
+  order           Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sellerId        String
+  seller          Seller      @relation(fields: [sellerId], references: [id])
+  status          String      @default("PENDING") // PENDING | PROCESSING | SHIPPED | DELIVERED | CANCELLED | REFUNDED
+  subtotal        Float
+  commissionTotal Float
+  sellerEarning   Float
+  trackingCompany String?
+  trackingNumber  String?
+  shippingFee     Float       @default(0) // this shipment's delivery charge (included in Order.shipping)
+  etaMinDays      Int?
+  etaMaxDays      Int?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
+  createdAt       DateTime    @default(now())
+  items           OrderItem[]
 }
 
 // Seller ledger. Balance = sum(amount) of rows with availableAt <= now
@@ -649,19 +685,105 @@ model SellerMessage {
 
 // Trade-in requests from the instant estimator
 model TradeIn {
-  id         String   @id @default(cuid())
-  name       String
-  email      String
-  phone      String
-  emirate    String
-  category   String
-  model      String
-  condition  String
-  details    String?
-  estimate   Float
-  payout     String   @default("CREDIT") // CREDIT (store gift card, +10%) | CASH
-  status     String   @default("NEW") // NEW | QUOTED | COLLECTED | PAID | REJECTED
-  offer      Float?
-  staffNote  String?
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  phone     String
+  emirate   String
+  category  String
+  model     String
+  condition String
+  details   String?
+  estimate  Float
+  payout    String   @default("CREDIT") // CREDIT (store gift card, +10%) | CASH
+  status    String   @default("NEW") // NEW | QUOTED | COLLECTED | PAID | REJECTED
+  offer     Float?
+  staffNote String?
+  createdAt DateTime @default(now())
+}
+
+// ───────────────────────── Private files (licences, evidence) ─────────────────────────
+// Stored outside /public; served only through /api/files/[id] after an authorization check.
+model PrivateFile {
+  id           String   @id @default(cuid())
+  storageKey   String   @unique
+  filename     String
+  mime         String
+  size         Int
+  ownerType    String // SELLER_DOC | CASE | OTHER
+  ownerId      String? // Seller.id for SELLER_DOC, SupportCase.id for CASE
+  uploadedById String?
+  createdAt    DateTime @default(now())
+}
+
+// ───────────────────────── Support & dispute cases ─────────────────────────
+model SupportCase {
+  id                  String        @id @default(cuid())
+  number              String        @unique
+  type                String // NOT_RECEIVED | DELAYED | DAMAGED | WRONG_ITEM | MISSING_ACCESSORY | CONDITION_MISMATCH | BATTERY_MISMATCH | DEFECTIVE | WARRANTY | RETURN | REFUND_DELAYED | PAYMENT | SELLER_CONDUCT | SAFETY | PRIVACY | OTHER
+  status              String        @default("OPEN") // OPEN | AWAITING_SELLER | AWAITING_BUYER | IN_REVIEW | PROPOSED | ESCALATED | RESOLVED | CLOSED
+  userId              String?
+  user                User?         @relation(fields: [userId], references: [id])
+  email               String
+  orderId             String?
+  order               Order?        @relation(fields: [orderId], references: [id])
+  orderItemId         String?
+  sellerId            String?
+  seller              Seller?       @relation(fields: [sellerId], references: [id])
+  reason              String
+  requestedResolution String        @default("REFUND") // REFUND | REPLACEMENT | REPAIR | RETURN | OTHER
+  quantity            Int?
+  policySnapshot      String? // JSON copied from the order item at checkout
+  proposedResolution  String?
+  decision            String? // REFUND | PARTIAL_REFUND | REPLACEMENT | REPAIR | RETURN | REJECTED
+  decisionNote        String?
+  refundAmount        Float         @default(0)
+  assignedTo          String? // staff user id
+  sellerDueAt         DateTime? // seller response deadline
+  escalateAt          DateTime? // auto-escalation time
+  repairStatus        String? // warranty: RECEIVED | DIAGNOSING | REPAIRING | SHIPPED_BACK | REPLACED
+  resolvedAt          DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  messages            CaseMessage[]
+}
+
+model CaseMessage {
+  id          String      @id @default(cuid())
+  caseId      String
+  case        SupportCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  authorRole  String // BUYER | SELLER | STAFF | SYSTEM
+  authorId    String?
+  authorName  String
+  body        String
+  internal    Boolean     @default(false) // staff-only note, never shown to buyer/seller
+  attachments String      @default("[]") // JSON array of PrivateFile ids
+  createdAt   DateTime    @default(now())
+}
+
+// ───────────────────────── Double-entry ledger (minor units = fils, immutable) ─────────────────────────
+// Every transaction must balance: sum(lines.amount) == 0. Debits are positive, credits negative.
+model LedgerTransaction {
+  id        String       @id @default(cuid())
+  kind      String // ORDER_PAID | REFUND | SELLER_EARNING | PAYOUT | ADJUSTMENT | PROVIDER_FEE
+  refType   String // ORDER | REFUND | PAYOUT | SELLER_ORDER | MANUAL
+  refId     String
+  note      String?
+  currency  String       @default("AED")
+  createdAt DateTime     @default(now())
+  lines     LedgerLine[]
+
+  @@unique([kind, refType, refId])
+}
+
+model LedgerLine {
+  id            String            @id @default(cuid())
+  transactionId String
+  transaction   LedgerTransaction @relation(fields: [transactionId], references: [id])
+  account       String // CASH_CLEARING | SALES_REVENUE | VAT_PAYABLE | SELLER_PAYABLE | PLATFORM_COMMISSION | SHIPPING_REVENUE | REFUNDS | PROVIDER_FEES | PAYOUTS_CLEARING | DISCOUNTS | GIFT_CARD_LIABILITY
+  sellerId      String?
+  amount        Int // signed minor units
+  memo          String?
+
+  @@index([account, sellerId])
 }

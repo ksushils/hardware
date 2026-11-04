@@ -8,6 +8,7 @@ import { getI18n } from "@/lib/i18n";
 import { EMIRATES } from "@/lib/format";
 import { canViewOrder } from "@/lib/orders";
 import { orderEvent, logActivity } from "@/lib/activity";
+import { limitByIp } from "@/lib/rateLimit";
 import type { FormState } from "./auth";
 
 export async function toggleWishlist(formData: FormData) {
@@ -82,10 +83,16 @@ export async function submitReview(_: FormState, formData: FormData): Promise<Fo
   const comment = String(formData.get("comment") || "").trim();
   if (!(rating >= 1 && rating <= 5)) return { error: locale === "ar" ? "يرجى اختيار التقييم." : "Please choose a rating." };
   if (comment.length < 5) return { error: locale === "ar" ? "يرجى كتابة تعليق قصير." : "Please write a short comment." };
+  // Verified-purchase reviews only: the reviewer must have a paid (or delivered COD), non-cancelled order containing this product.
+  const bought = await db.orderItem.findFirst({
+    where: { productId, order: { userId: user.id, status: { notIn: ["CANCELLED", "DRAFT"] }, OR: [{ paymentStatus: "PAID" }, { fulfillmentStatus: "DELIVERED" }] } },
+    select: { id: true },
+  });
+  if (!bought) return { error: locale === "ar" ? "يمكن فقط للمشترين كتابة تقييم لهذا المنتج." : "Only customers who bought this product can review it." };
   await db.review.upsert({
     where: { productId_userId: { productId, userId: user.id } },
-    update: { rating, comment, status: "PUBLISHED" },
-    create: { productId, userId: user.id, rating, comment },
+    update: { rating, comment, status: "PUBLISHED", verified: true },
+    create: { productId, userId: user.id, rating, comment, verified: true },
   });
   revalidatePath("/products/[slug]", "page");
   return { ok: locale === "ar" ? "شكرًا لتقييمك!" : "Thanks for your review!" };
@@ -93,6 +100,7 @@ export async function submitReview(_: FormState, formData: FormData): Promise<Fo
 
 export async function subscribeNewsletter(_: FormState, formData: FormData): Promise<FormState> {
   const { locale } = await getI18n();
+  if (!(await limitByIp("newsletter", 10, 3600))) return { error: locale === "ar" ? "محاولات كثيرة." : "Too many attempts." };
   const email = String(formData.get("email") || "").trim().toLowerCase();
   if (!z.string().email().safeParse(email).success) return { error: locale === "ar" ? "بريد غير صالح" : "Invalid email" };
   await db.subscriber.upsert({ where: { email }, update: {}, create: { email, locale, source: String(formData.get("source") || "footer") } });
@@ -102,6 +110,7 @@ export async function subscribeNewsletter(_: FormState, formData: FormData): Pro
 
 export async function requestStockAlert(_: FormState, formData: FormData): Promise<FormState> {
   const { t } = await getI18n();
+  if (!(await limitByIp("stockalert", 10, 3600))) return { error: "Too many attempts." };
   const variantId = String(formData.get("variantId") || "");
   const email = String(formData.get("email") || "").trim().toLowerCase();
   if (!z.string().email().safeParse(email).success) return { error: t.auth.errors.email };
@@ -130,6 +139,7 @@ export async function requestReturn(_: FormState, formData: FormData): Promise<F
 export async function askQuestion(_: FormState, formData: FormData): Promise<FormState> {
   const { locale } = await getI18n();
   const ar = locale === "ar";
+  if (!(await limitByIp("question", 6, 3600))) return { error: ar ? "محاولات كثيرة." : "Too many attempts. Please try again later." };
   const productId = String(formData.get("productId") || "");
   const name = String(formData.get("name") || "").trim().slice(0, 60);
   const email = String(formData.get("email") || "").trim().toLowerCase();
@@ -143,6 +153,7 @@ export async function askQuestion(_: FormState, formData: FormData): Promise<For
 export async function submitTradeIn(_: FormState, formData: FormData): Promise<FormState> {
   const { locale } = await getI18n();
   const ar = locale === "ar";
+  if (!(await limitByIp("tradein", 5, 3600))) return { error: ar ? "محاولات كثيرة." : "Too many requests. Please try again later." };
   const f = (k: string) => String(formData.get(k) || "").trim();
   if (!f("name") || !z.string().email().safeParse(f("email")).success || !/^(\+971|0)?5\d{8}$/.test(f("phone")) || !f("model")) return { error: ar ? "يرجى إدخال بيانات صحيحة." : "Please enter valid details (UAE mobile number)." };
   const t = await db.tradeIn.create({

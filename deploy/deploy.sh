@@ -34,7 +34,8 @@ fi
 cd "$APP_DIR"
 
 # 3. Persistent data (database + uploads live outside the code folder, so updates never touch them)
-sudo mkdir -p "$DATA_DIR/uploads" && sudo chown -R "$USER" "$DATA_DIR"
+sudo mkdir -p "$DATA_DIR/uploads" "$DATA_DIR/private" && sudo chown -R "$USER" "$DATA_DIR"
+chmod 700 "$DATA_DIR/private"
 [ -L public/uploads ] || { rm -rf public/uploads; ln -s "$DATA_DIR/uploads" public/uploads; }
 
 # 4. Environment (created once, then kept)
@@ -51,6 +52,8 @@ EMAIL_FROM="TechRevive <support@${DOMAIN:-example.com}>"
 ADMIN_EMAIL="admin@${DOMAIN:-techrevive.ae}"
 ADMIN_PASSWORD="$(openssl rand -base64 12)"
 PORT=$PORT
+PRIVATE_DIR="$DATA_DIR/private"
+CRON_SECRET="$(openssl rand -hex 24)"
 ENV
   FIRST_RUN=1
 fi
@@ -63,6 +66,15 @@ npm ci --no-audit --no-fund
 say "Updating database schema"
 npx prisma db push --skip-generate
 npx prisma generate
+# make sure older installs have the new settings
+grep -q '^PRIVATE_DIR=' "$DATA_DIR/.env" || echo "PRIVATE_DIR=\"$DATA_DIR/private\"" >> "$DATA_DIR/.env"
+grep -q '^CRON_SECRET=' "$DATA_DIR/.env" || echo "CRON_SECRET=\"$(openssl rand -hex 24)\"" >> "$DATA_DIR/.env"
+set -a; . ./.env; set +a
+echo "==> Data migrations"
+npx tsx scripts/backfill.ts
+npx tsx scripts/migrate-private-docs.ts
+[ -f scripts/apply-ledger-triggers.ts ] && npx tsx scripts/apply-ledger-triggers.ts || true
+[ -f scripts/ledger-backfill.ts ] && npx tsx scripts/ledger-backfill.ts || true
 if [ "${FIRST_RUN:-0}" = 1 ] || [ "${SEED:-0}" = 1 ]; then
   say "Seeding store data (categories, demo products, pages, admin user)"
   npx tsx prisma/seed.ts
@@ -75,6 +87,10 @@ say "Starting on 127.0.0.1:$PORT"
 PORT=$PORT pm2 startOrReload deploy/ecosystem.config.cjs --update-env
 pm2 save
 pm2 startup systemd -u "$USER" --hp "$HOME" >/dev/null 2>&1 || true
+
+# 6b. Scheduled jobs (release unpaid card orders, escalate overdue support cases) every 10 minutes
+CRON_LINE="*/10 * * * * . $DATA_DIR/.env; curl -fsS -H \"Authorization: Bearer \$CRON_SECRET\" http://127.0.0.1:$PORT/api/cron/orders >/dev/null 2>&1; curl -fsS -H \"Authorization: Bearer \$CRON_SECRET\" http://127.0.0.1:$PORT/api/cron/cases >/dev/null 2>&1 # techrevive"
+( crontab -l 2>/dev/null | grep -v '# techrevive'; echo "$CRON_LINE" ) | crontab -
 
 # 7. nginx site (only if nginx exists and the site isn't configured yet)
 if [ -n "$DOMAIN" ] && command -v nginx >/dev/null && [ ! -f /etc/nginx/sites-available/techrevive ]; then

@@ -17,8 +17,8 @@ const en = {
   } as Record<string, string>,
   header: { helpCenter: "Help Center", trackOrder: "Track Your Order", hotDeals: "🔥 Hot Deals", express: "⚡ Express 24h", blog: "Blog", collections: "Collections" },
   trust: {
-    warranty: "12-Month Warranty", warrantySub: "On every renewed part", delivery: "Free Delivery", deliverySub: "Across the UAE over AED 200",
-    returns: "14-Day Returns", returnsSub: "No questions asked", bnpl: "Buy Now, Pay Later", bnplSub: "Split into 4 payments",
+    warranty: "{months}-Month Warranty", warrantySub: "On renewed items (see each offer)", delivery: "Free Delivery", deliverySub: "Across the UAE over AED 200",
+    returns: "{days}-Day Returns", returnsSub: "Terms shown on every offer", bnpl: "Buy Now, Pay Later", bnplSub: "Split into 4 payments",
   },
   home: {
     badge: "Certified Renewed · Tested in Dubai", shopDeals: "Shop Hot Deals", browseGpus: "Browse GPUs", trusted: "Trusted by gamers, creators & businesses across the UAE",
@@ -28,10 +28,10 @@ const en = {
     whatIsText: "Renewed hardware is genuine, pre-owned or open-box equipment that our technicians in Dubai have inspected, cleaned, benchmarked and graded. You get the same performance for a fraction of the price, and keep e-waste out of landfill.",
     howWeGrade: "How we grade",
     promises: [
-      ["40-point inspection", "Stress tests, thermals, benchmarks, SMART and MemTest checks on every part."],
-      ["Never mining cards", "We screen sellers and reject ex-mining GPUs. Only 1 in 4 suppliers is accepted."],
-      ["Honest grading", "Excellent, Very Good or Good. Cosmetic condition described with photos."],
-      ["Local warranty & support", "A 12-month warranty handled from Dubai, with no shipping parts abroad."],
+      ["Condition, clearly graded", "Every listing states its condition grade and what was tested, and labels what is seller-declared versus verified."],
+      ["Disclosed history", "Battery health, repairs and included accessories are shown on the listing wherever the seller supplies them."],
+      ["Honest grading", "Excellent, Very Good or Good, with the cosmetic condition described and photos of the exact unit where provided."],
+      ["Warranty and support", "Warranty and return terms are shown per offer, and our team helps resolve any issue between buyer and seller."],
     ] as [string, string][],
     fromBlog: "From the blog", pauseVideo: "Pause background video", playVideo: "Play background video",
   },

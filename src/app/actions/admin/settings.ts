@@ -82,6 +82,11 @@ export async function saveCheckout(_: FS, fd: FormData): Promise<FS> {
     },
     warranty: { months: n(fd, "warrantyMonths", 12), carePlusPercent: n(fd, "carePlusPercent", 6), carePlusMin: n(fd, "carePlusMin", 29), carePlusMonths: n(fd, "carePlusMonths", 24) },
     returnsDays: n(fd, "returnsDays", 14),
+    express: {
+      showCountdown: b(fd, "showCountdown"),
+      cutoffHour: Math.max(0, Math.min(23, Math.round(n(fd, "cutoffHour", 15)))),
+      noDeliveryWeekdays: fd.getAll("noDeliveryWeekdays").map(Number).filter((d) => d >= 0 && d <= 6),
+    },
   });
   return done(user, "checkout & payments");
 }
@@ -139,4 +144,15 @@ export async function deleteShippingRate(fd: FormData) {
   const r = await db.shippingRate.delete({ where: { id: s(fd, "id") } });
   await logActivity(user, "deleted", "shipping", `Deleted shipping rate "${r.name}"`);
   revalidatePath("/admin/settings/shipping");
+}
+
+// ───────── Seller-shipment courier window ─────────
+export async function saveCarrierWindow(_: FS, fd: FormData): Promise<FS> {
+  const user = await requirePermission("settings");
+  const min = Math.round(n(fd, "carrierMinDays", 1));
+  const max = Math.round(n(fd, "carrierMaxDays", 3));
+  if (min < 0 || max < min || max > 30) return { error: "Enter a valid window: minimum 0 or more, maximum at least the minimum (30 at most)." };
+  const cur = (await getSettings()).delivery;
+  await updateSettings({ delivery: { ...cur, carrierMinDays: min, carrierMaxDays: max } });
+  return done(user, "delivery window");
 }

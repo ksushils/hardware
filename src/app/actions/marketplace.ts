@@ -6,7 +6,8 @@ import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { getI18n } from "@/lib/i18n";
 import { getSettings } from "@/lib/settings";
-import { saveUpload } from "@/lib/uploads";
+import { savePrivateFile } from "@/lib/privateStorage";
+import { limitByIp } from "@/lib/rateLimit";
 import { sendEmail, btn } from "@/lib/mailer";
 import { siteUrl } from "@/lib/site";
 import { logActivity } from "@/lib/activity";
@@ -29,6 +30,7 @@ export async function applyAsSeller(_: FormState, fd: FormData): Promise<FormSta
   const user = await getUser();
   if (!user) redirect("/login?next=/become-a-seller/apply");
   if (await db.seller.findUnique({ where: { userId: user.id } })) redirect("/seller");
+  if (!(await limitByIp("apply-seller", 4, 86400))) return { error: ar ? "محاولات كثيرة." : "Too many applications from this connection. Try again tomorrow." };
   const s = await getSettings();
   if (!s.marketplace.enabled) return { error: ar ? "التسجيل كبائع غير متاح حاليًا." : "Seller registration is currently closed." };
 
@@ -56,28 +58,29 @@ export async function applyAsSeller(_: FormState, fd: FormData): Promise<FormSta
   const { slug, available } = await checkShopSlug(d.slug);
   if (!available) return { error: ar ? "رابط المتجر غير متاح" : "That shop URL is taken. Try another." };
 
-  let tradeLicenseUrl: string | undefined;
+  // Licence documents are private: validated by content (not just MIME) and stored outside /public (see src/lib/privateStorage.ts).
   const file = fd.get("tradeLicense");
-  if (file instanceof File && file.size) {
-    if (!["image/png", "image/jpeg", "image/webp", "application/pdf"].includes(file.type)) return { error: ar ? "ارفع الرخصة بصيغة صورة أو PDF" : "Upload the licence as an image or PDF" };
-    try {
-      // PDFs aren't in saveUpload's allow-list; store images via the media library, PDFs directly
-      if (file.type === "application/pdf") tradeLicenseUrl = await savePdf(file);
-      else tradeLicenseUrl = (await saveUpload(file, `Trade licence – ${d.shopName}`)).url;
-    } catch (e) {
-      return { error: e instanceof Error ? e.message : "Upload failed" };
-    }
-  }
+  const licenceFile = file instanceof File && file.size ? file : null;
+  if (licenceFile && !["image/png", "image/jpeg", "image/webp", "application/pdf"].includes(licenceFile.type)) return { error: ar ? "ارفع الرخصة بصيغة صورة أو PDF" : "Upload the licence as an image or PDF" };
 
   const status = s.marketplace.autoApproveSellers ? "APPROVED" : "PENDING";
   const seller = await db.seller.create({
     data: {
       userId: user.id, shopName: d.shopName, slug, status, email: d.email, phone: d.phone, emirate: d.emirate, address: d.address,
-      trn: d.trn || null, tradeLicenseNo: d.tradeLicenseNo, tradeLicenseExpiry: expiry, tradeLicenseUrl, about: d.about ?? "",
+      trn: d.trn || null, tradeLicenseNo: d.tradeLicenseNo, tradeLicenseExpiry: expiry, about: d.about ?? "",
       bankName: d.bankName || null, accountName: d.accountName || null, iban: d.iban ? d.iban.toUpperCase() : null,
       approvedAt: status === "APPROVED" ? new Date() : null,
     },
   });
+  if (licenceFile) {
+    try {
+      const pf = await savePrivateFile(licenceFile, { ownerType: "SELLER_DOC", ownerId: seller.id, uploadedById: user.id });
+      await db.seller.update({ where: { id: seller.id }, data: { tradeLicenseUrl: `/api/files/${pf.id}` } });
+    } catch (e) {
+      // keep the application; staff will request the document again
+      await logActivity({ id: user.id, name: user.name }, "warning", "seller", `Licence upload failed for ${seller.shopName}: ${e instanceof Error ? e.message : e}`, seller.id);
+    }
+  }
   await logActivity({ id: user.id, name: user.name }, "applied", "seller", `Seller application: ${seller.shopName}`, seller.id);
   await sendEmail(
     d.email,
@@ -92,21 +95,11 @@ export async function applyAsSeller(_: FormState, fd: FormData): Promise<FormSta
   redirect(status === "APPROVED" ? "/seller" : "/seller/status");
 }
 
-async function savePdf(file: File) {
-  const { mkdir, writeFile } = await import("node:fs/promises");
-  const path = await import("node:path");
-  if (file.size > 10 * 1024 * 1024) throw new Error("File too large (max 10MB)");
-  const name = `${Date.now().toString(36)}-licence.pdf`;
-  const dir = path.join(process.cwd(), "public", "uploads", "docs");
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, name), Buffer.from(await file.arrayBuffer()));
-  return `/uploads/docs/${name}`;
-}
-
 /** "Contact seller" form on the shop/product page. */
 export async function contactSeller(_: FormState, fd: FormData): Promise<FormState> {
   const { locale } = await getI18n();
   const ar = locale === "ar";
+  if (!(await limitByIp("contactseller", 6, 3600))) return { error: ar ? "محاولات كثيرة." : "Too many messages. Please try again later." };
   const user = await getUser();
   const sellerId = String(fd.get("sellerId") || "");
   const seller = await db.seller.findUnique({ where: { id: sellerId } });

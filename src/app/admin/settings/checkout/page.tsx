@@ -48,6 +48,19 @@ export default async function CheckoutSettings() {
           <Toggle name="orderNotes" label="Show delivery notes field" defaultChecked={c.orderNotes} />
           <Toggle name="marketingOptIn" label="Show email marketing opt-in at checkout" defaultChecked={c.marketingOptIn} />
         </Card>
+        <Card title="Express delivery countdown">
+          <Toggle name="showCountdown" label="Show “Order within Xh to get it by …” on Express products" help="Only turn this on if you really can deliver the next working day. Express products are chosen per product." defaultChecked={s.express.showCountdown} />
+          <Grid>
+            <Field label="Daily order cutoff (hour, UAE time, 0–23)"><input name="cutoffHour" type="number" min={0} max={23} defaultValue={s.express.cutoffHour} className="in-a" /></Field>
+            <Field label="No deliveries on">
+              <div className="flex flex-wrap gap-3 pt-1 text-sm">
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, i) => (
+                  <label key={d} className="flex items-center gap-1.5"><input type="checkbox" name="noDeliveryWeekdays" value={i} defaultChecked={s.express.noDeliveryWeekdays.includes(i)} /> {d}</label>
+                ))}
+              </div>
+            </Field>
+          </Grid>
+        </Card>
         <Card title="Warranty, Care+ and returns">
           <Grid>
             <Field label="Standard warranty (months)"><input name="warrantyMonths" type="number" min={0} defaultValue={s.warranty.months} className="in-a" /></Field>
