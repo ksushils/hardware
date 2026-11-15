@@ -128,6 +128,5 @@ const ar: Dict = {
     ],
   },
   notFound: { title: "الصفحة غير موجودة" },
-  whatsapp: "تواصل عبر واتساب",
 };
 export default ar;

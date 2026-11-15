@@ -42,7 +42,7 @@ export async function saveGeneral(_: FS, fd: FormData): Promise<FS> {
   }
   await updateSettings({
     storeName: s(fd, "storeName"), storeNameAr: s(fd, "storeNameAr"), legalName: s(fd, "legalName"), trn,
-    email, phone: s(fd, "phone"), whatsapp: s(fd, "whatsapp").replace(/\D/g, ""),
+    email, phone: s(fd, "phone"),
     address: s(fd, "address"), addressAr: s(fd, "addressAr"), hours: s(fd, "hours"), hoursAr: s(fd, "hoursAr"), logoUrl,
     social: { instagram: s(fd, "instagram"), facebook: s(fd, "facebook"), x: s(fd, "x"), tiktok: s(fd, "tiktok"), youtube: s(fd, "youtube") },
     seo: { title: s(fd, "seoTitle"), description: s(fd, "seoDescription") },

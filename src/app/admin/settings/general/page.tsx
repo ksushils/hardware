@@ -26,7 +26,6 @@ export default async function GeneralSettings() {
           <Grid>
             <Field label="Customer support email"><input name="email" type="email" defaultValue={s.email} className="in-a" /></Field>
             <Field label="Phone"><input name="phone" defaultValue={s.phone} className="in-a" /></Field>
-            <Field label="WhatsApp number" help="International format without +, e.g. 971501234567. Powers the chat button."><input name="whatsapp" defaultValue={s.whatsapp} className="in-a font-mono" /></Field>
             <div />
             <Field label="Address"><input name="address" defaultValue={s.address} className="in-a" /></Field>
             <Field label="Address (Arabic)"><input name="addressAr" dir="rtl" defaultValue={s.addressAr} className="in-a" /></Field>

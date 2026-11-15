@@ -11,7 +11,6 @@ export const DEFAULT_SETTINGS = {
   trn: "", // UAE VAT Tax Registration Number, printed on tax invoices
   email: "support@techrevive.ae",
   phone: "+971 4 000 0000",
-  whatsapp: "971500000000",
   address: "Dubai, United Arab Emirates",
   addressAr: "دبي، الإمارات العربية المتحدة",
   hours: "Sun–Fri, 9:00–18:00",

@@ -1,6 +1,5 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import WhatsAppButton from "@/components/WhatsAppButton";
 import { OrganizationJsonLd } from "@/components/JsonLd";
 
 export default function StoreLayout({ children }: { children: React.ReactNode }) {
@@ -10,7 +9,6 @@ export default function StoreLayout({ children }: { children: React.ReactNode })
       <Header />
       <main className="flex-1">{children}</main>
       <Footer />
-      <WhatsAppButton />
     </div>
   );
 }

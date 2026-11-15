@@ -126,7 +126,6 @@ const en = {
     ] as [string, string][],
   },
   notFound: { title: "Page not found" },
-  whatsapp: "Chat on WhatsApp",
 };
 export default en;
 export type Dict = typeof en;
