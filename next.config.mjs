@@ -2,14 +2,23 @@
 
 // Security headers. CSP keeps 'unsafe-inline' for scripts/styles because Next.js injects inline bootstrap scripts;
 // it still blocks framing, plugins, base-tag and form-action hijacking.
+// Optional hosted chat assistant (env CHAT_WIDGET_SRC, an https .js address): its origin is allowed for scripts and
+// connections. Read at build time, so it is passed to the Docker build as well as to the running app.
+let chatOrigin = "";
+try {
+  if (/^https:\/\/[^\s"'<>]+\.js(\?[^\s"'<>]*)?$/.test(process.env.CHAT_WIDGET_SRC || "")) chatOrigin = " " + new URL(process.env.CHAT_WIDGET_SRC).origin;
+} catch {
+  chatOrigin = "";
+}
+
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'"}`,
+  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'"}${chatOrigin}`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' blob: https:",
-  "connect-src 'self'",
+  `connect-src 'self'${chatOrigin}`,
   "frame-ancestors 'none'",
   "object-src 'none'",
   "base-uri 'self'",
